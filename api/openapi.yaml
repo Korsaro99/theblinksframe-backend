@@ -1,0 +1,1788 @@
+openapi: 3.0.3
+info:
+  title: The Blinks API
+  version: 0.1.0
+  description: |
+    REST API for The Blinks storefront and back office. This file is the contract between
+    `theblinksframe-backend` and the Angular frontend: change it first, then regenerate both sides.
+
+    **Conventions**
+    - JSON field names are camelCase. Enums are UPPER_CASE strings.
+    - Money is an integer number of pesewas (GH₵1 = 100 pesewas); field names end in `Pesewas`.
+    - Timestamps are RFC 3339 in UTC. Reporting periods are computed in Africa/Accra (UTC+0).
+    - Phone numbers may be sent in local form (`024 123 4567`); the API stores and returns E.164 (`+233241234567`).
+    - Lists return `{ "items": [...], "total": n }` and take `?page=&pageSize=` (page starts at 1).
+    - Errors are RFC 9457 `application/problem+json`. `detail` is written for people and can be shown as is;
+      `code` is stable and meant for frontend logic.
+
+    **Admin authentication**
+    - `POST /auth/login` sets two HttpOnly, Secure, SameSite=Lax cookies:
+      `blinks_at` (access JWT, 15 minutes) and `blinks_rt` (refresh token, path `/api/v1/auth/refresh`).
+    - When a request returns 401, call `POST /auth/refresh` once (one refresh at a time across tabs), then retry.
+    - Refresh tokens rotate on every use. Presenting an already-used refresh token logs that session out everywhere.
+    - Mutating admin requests (POST, PUT, PATCH, DELETE) must send the `X-CSRF-Token` header. Its value comes from
+      `csrfToken` in the login, refresh and `/auth/me` responses; keep it in memory, not in storage.
+
+    `GET /healthz` (outside `/api/v1`) is an uptime check and is not part of this contract.
+servers:
+  - url: /api/v1
+
+tags:
+  - name: Auth
+    description: Staff login and sessions for the back office.
+  - name: Catalogue
+    description: Public storefront catalogue.
+  - name: Delivery
+    description: Delivery zones and cart pricing.
+  - name: Orders
+    description: Public checkout, payment and order tracking.
+  - name: Webhooks
+    description: Callbacks from the payment provider.
+  - name: Admin catalogue
+    description: Brands and products in the back office.
+  - name: Admin orders
+    description: The order pipeline in the back office.
+
+paths:
+  # ---------------------------------------------------------------- Auth
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Log in a staff member
+      description: |
+        Sets the `blinks_at` and `blinks_rt` cookies. Rate-limited per IP and per login; too many
+        failures return 429 with `Retry-After`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Logged in.
+          headers:
+            Set-Cookie:
+              description: '`blinks_at` and `blinks_rt` auth cookies.'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '401':
+          description: Wrong phone/email or password, or the account is disabled. The message does not say which.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: Swap the refresh token for new access and refresh tokens
+      description: |
+        Uses the `blinks_rt` cookie and sets new `blinks_at` and `blinks_rt` cookies.
+        Returns 401 when the session has expired, was revoked, or the token was already used
+        (possible theft: the whole session is then revoked). The frontend should then go to the login page.
+      security: [{ refreshCookie: [] }]
+      responses:
+        '200':
+          description: New tokens set.
+          headers:
+            Set-Cookie:
+              description: New `blinks_at` and `blinks_rt` cookies.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Log out this device
+      description: Revokes the current session and clears the auth cookies.
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      responses:
+        '204':
+          description: Logged out.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getMe
+      summary: The logged-in staff member
+      description: Call on app start to restore the session and get a CSRF token.
+      security: [{ accessCookie: [] }]
+      responses:
+        '200':
+          description: The current session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------------------------------------------------------- Public catalogue
+  /catalog/products:
+    get:
+      tags: [Catalogue]
+      operationId: listProducts
+      summary: Storefront product listing
+      description: |
+        Only published, visible products. `gender=MEN` also returns UNISEX products, and so does `gender=WOMEN`.
+        Accessories are listed with `category=ACCESSORY`.
+      security: []
+      parameters:
+        - name: gender
+          in: query
+          schema: { type: string, enum: [MEN, WOMEN] }
+        - name: category
+          in: query
+          schema: { $ref: '#/components/schemas/Category' }
+        - name: brand
+          in: query
+          description: Brand slugs. Repeat to select several (`brand=volta&brand=zuri`).
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+        - name: style
+          in: query
+          schema: { type: array, items: { $ref: '#/components/schemas/Style' } }
+          style: form
+          explode: true
+        - name: band
+          in: query
+          schema: { $ref: '#/components/schemas/PriceBand' }
+        - name: polarized
+          in: query
+          description: When true, only products labelled POLARIZED.
+          schema: { type: boolean }
+        - name: label
+          in: query
+          description: Only products with this label, e.g. `label=NEW` for the "New in" page.
+          schema: { $ref: '#/components/schemas/Label' }
+        - name: sort
+          in: query
+          schema: { $ref: '#/components/schemas/ProductSort' }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: A page of products.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductSummaryList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /catalog/products/{slug}:
+    get:
+      tags: [Catalogue]
+      operationId: getProduct
+      summary: Product page
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /catalog/brands:
+    get:
+      tags: [Catalogue]
+      operationId: listBrands
+      summary: Brands with at least one product on sale
+      security: []
+      parameters:
+        - name: gender
+          in: query
+          description: Only brands with products for this gender (UNISEX products count for both).
+          schema: { type: string, enum: [MEN, WOMEN] }
+      responses:
+        '200':
+          description: All matching brands, ordered by name. Not paginated (the list is short).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandList' }
+
+  /catalog/brands/{slug}:
+    get:
+      tags: [Catalogue]
+      operationId: getBrand
+      summary: One brand (its products come from /catalog/products?brand=slug)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: The brand.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Brand' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /catalog/menu:
+    get:
+      tags: [Catalogue]
+      operationId: getMenu
+      summary: Counts that feed the desktop and phone menus
+      security: []
+      responses:
+        '200':
+          description: Menu counts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Menu' }
+
+  # ---------------------------------------------------------------- Delivery
+  /delivery/zones:
+    get:
+      tags: [Delivery]
+      operationId: listDeliveryZones
+      summary: Active delivery zones for checkout
+      description: |
+        Pickup at Kejetia, Gate 4 is not a zone: it is `fulfilment=PICKUP` and always free.
+        TODO(open): the real zones and fees come from the client (BRIEF §9).
+      security: []
+      responses:
+        '200':
+          description: All active zones. Not paginated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryZoneList' }
+
+  /cart/quote:
+    post:
+      tags: [Delivery]
+      operationId: quoteCart
+      summary: Price a cart before checkout
+      description: |
+        Returns current prices and the delivery fee. Problems such as sold-out items are reported per line
+        (`issue`) instead of failing the request, so the cart can show them. The same pricing runs again
+        when the order is created; the frontend never computes totals itself.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CartQuoteRequest' }
+      responses:
+        '200':
+          description: The priced cart.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CartQuote' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  # ---------------------------------------------------------------- Public orders
+  /orders:
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Place a website order
+      description: |
+        Creates the order as AWAITING_PAYMENT and returns it. Stock is not reserved: it goes down when the order
+        is PAID. Unpaid website orders are cancelled after 30 minutes (`payBy`).
+        Send an `Idempotency-Key` so a retried request on a flaky connection doesn't create a second order.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrderRequest' }
+      responses:
+        '201':
+          description: Order created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicOrder' }
+        '409':
+          description: |
+            An item is sold out or has too little stock (`code` OUT_OF_STOCK), or a product is no longer
+            on sale (`code` PRODUCT_UNAVAILABLE). Re-quote the cart.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /orders/{orderId}/pay:
+    post:
+      tags: [Orders]
+      operationId: payOrder
+      summary: Start a mobile money payment
+      description: |
+        Asks the payment provider to send a prompt to the customer's phone. The order is only marked PAID
+        after the provider's webhook arrives and a server-side verify call confirms the amount, never from
+        this call or a browser redirect. Poll `GET /orders/{orderId}/payment` to show the waiting state.
+        Calling it again after a failed attempt starts a new attempt.
+        TODO(open): payment provider, Paystack or Hubtel (BRIEF §8). Development uses a fake provider.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayOrderRequest' }
+      responses:
+        '202':
+          description: Payment started; waiting for the customer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentState' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The order is not awaiting payment (`code` ORDER_NOT_PAYABLE), e.g. already paid or cancelled.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502':
+          description: The payment provider could not be reached or refused the request (`code` PROVIDER_ERROR).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /orders/{orderId}/payment:
+    get:
+      tags: [Orders]
+      operationId: getOrderPayment
+      summary: Payment progress, for the "approve on your phone" screen
+      description: Poll every few seconds while `payment.status` is PENDING.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Current state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentState' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /orders/{number}/status:
+    get:
+      tags: [Orders]
+      operationId: getOrderStatus
+      summary: Customer order tracking
+      description: |
+        Needs the order number and the phone number used on the order. A wrong phone returns the same
+        404 as an unknown order. Rate-limited.
+      security: []
+      parameters:
+        - name: number
+          in: path
+          required: true
+          description: Order number without the "#", e.g. 1091.
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: phone
+          in: query
+          required: true
+          schema: { type: string, example: '024 123 4567' }
+      responses:
+        '200':
+          description: Tracking details.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderTracking' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  # ---------------------------------------------------------------- Webhooks
+  /webhooks/payments/{provider}:
+    post:
+      tags: [Webhooks]
+      operationId: receivePaymentWebhook
+      summary: Payment provider callbacks
+      description: |
+        Called by the payment provider, not the frontend. The signature header depends on the provider and
+        is checked against the raw body. The raw payload is stored, handling is idempotent on the provider's
+        reference, and the endpoint returns 200 quickly. A payment only counts after a server-side verify call.
+        TODO(open): provider choice decides the signature header and payload shape (BRIEF §8).
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [paystack, hubtel, fake] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Received (also returned for duplicates).
+        '401':
+          description: Signature missing or invalid.
+
+  # ---------------------------------------------------------------- Admin catalogue
+  /admin/brands:
+    get:
+      tags: [Admin catalogue]
+      operationId: adminListBrands
+      summary: All brands
+      description: Sales figures for the Brands table come from the analytics endpoints (M6).
+      security: [{ accessCookie: [] }]
+      responses:
+        '200':
+          description: All brands, ordered by name. Not paginated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBrandList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Admin catalogue]
+      operationId: adminCreateBrand
+      summary: Add a brand
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrandInput' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBrand' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Name or slug already used (`code` DUPLICATE).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /admin/brands/{brandId}:
+    parameters:
+      - name: brandId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Admin catalogue]
+      operationId: adminGetBrand
+      summary: One brand
+      security: [{ accessCookie: [] }]
+      responses:
+        '200':
+          description: The brand.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBrand' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Admin catalogue]
+      operationId: adminUpdateBrand
+      summary: Replace a brand's details
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrandInput' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBrand' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Name or slug already used (`code` DUPLICATE).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Admin catalogue]
+      operationId: adminDeleteBrand
+      summary: Delete a brand with no products (OWNER only)
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      responses:
+        '204':
+          description: Deleted.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The brand still has products (`code` BRAND_HAS_PRODUCTS).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /admin/products:
+    get:
+      tags: [Admin catalogue]
+      operationId: adminListProducts
+      summary: Products for the back-office table
+      description: Includes drafts and hidden products. Grouping (gender, then brand) is done by the frontend.
+      security: [{ accessCookie: [] }]
+      parameters:
+        - name: gender
+          in: query
+          schema: { $ref: '#/components/schemas/Gender' }
+        - name: category
+          in: query
+          schema: { $ref: '#/components/schemas/Category' }
+        - name: brandId
+          in: query
+          schema: { type: array, items: { type: string, format: uuid } }
+          style: form
+          explode: true
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ProductStatus' }
+        - name: lowStock
+          in: query
+          description: When true, only products at or below their low-stock threshold.
+          schema: { type: boolean }
+        - name: q
+          in: query
+          description: Search model name and SKU.
+          schema: { type: string, maxLength: 100 }
+        - $ref: '#/components/parameters/Page'
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+      responses:
+        '200':
+          description: A page of products.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProductList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Admin catalogue]
+      operationId: adminCreateProduct
+      summary: Add a product
+      description: |
+        Photos are attached in M2 through the media endpoints. Publishing (`status: PUBLISHED`) requires
+        a cover photo; otherwise 422 lists what is missing (the "Ready to publish?" checklist).
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProduct' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Slug or SKU already used (`code` DUPLICATE).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /admin/products/{productId}:
+    parameters:
+      - name: productId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Admin catalogue]
+      operationId: adminGetProduct
+      summary: One product, for the edit form
+      security: [{ accessCookie: [] }]
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProduct' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Admin catalogue]
+      operationId: adminUpdateProduct
+      summary: Save the edit form (replaces all editable fields, including colours)
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProduct' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Slug or SKU already used (`code` DUPLICATE).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    patch:
+      tags: [Admin catalogue]
+      operationId: adminPatchProduct
+      summary: Quick changes from the products table (on-website toggle, stock count, publish)
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductPatch' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminProduct' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Admin catalogue]
+      operationId: adminDeleteProduct
+      summary: Delete a product that has never been ordered (OWNER only)
+      description: Products with orders can't be deleted, because orders and stats refer to them. Hide them instead.
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      responses:
+        '204':
+          description: Deleted.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The product has orders (`code` PRODUCT_HAS_ORDERS).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  # ---------------------------------------------------------------- Admin orders
+  /admin/orders:
+    get:
+      tags: [Admin orders]
+      operationId: adminListOrders
+      summary: Orders list, newest first
+      security: [{ accessCookie: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: array, items: { $ref: '#/components/schemas/OrderStatus' } }
+          style: form
+          explode: true
+        - name: source
+          in: query
+          schema: { $ref: '#/components/schemas/OrderSource' }
+        - name: fulfilment
+          in: query
+          schema: { $ref: '#/components/schemas/Fulfilment' }
+        - name: needsAttention
+          in: query
+          schema: { type: boolean }
+        - name: q
+          in: query
+          description: Customer name, phone, or order number (with or without "#").
+          schema: { type: string, maxLength: 100 }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: A page of orders.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrderSummaryList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Admin orders]
+      operationId: adminCreateOrder
+      summary: Add a WhatsApp order or record a shop sale
+      description: |
+        Prices come from the catalogue unless an item has `unitPricePesewas`, the price agreed in the chat.
+        Website orders can never override prices. With `payment`, the order starts as PAID with a
+        MANUAL payment (stock goes down); without it, AWAITING_PAYMENT. A paid SHOP sale is handed over on the
+        spot, so it is recorded straight as DELIVERED. If stock is short, the order is still recorded and
+        flagged with `needsAttention`, so a sale that already happened is never lost.
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminCreateOrderRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Payment reference already recorded (`code` DUPLICATE_PAYMENT_REFERENCE).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /admin/orders/pipeline:
+    get:
+      tags: [Admin orders]
+      operationId: adminGetOrderPipeline
+      summary: Pipeline counts for the Orders header and the sidebar to-do badge
+      security: [{ accessCookie: [] }]
+      responses:
+        '200':
+          description: Counts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderPipeline' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags: [Admin orders]
+      operationId: adminGetOrder
+      summary: Order detail
+      security: [{ accessCookie: [] }]
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Admin orders]
+      operationId: adminPatchOrder
+      summary: Edit the private note or clear the attention flag
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminOrderPatch' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /admin/orders/{orderId}/transition:
+    post:
+      tags: [Admin orders]
+      operationId: adminTransitionOrder
+      summary: Move an order to its next status (the next-step button)
+      description: |
+        `to` must be one of the order's `allowedTransitions`. In one database transaction this writes an order
+        event, adjusts stock (down on PAID, back up on CANCELLED) and queues the customer message, which is sent
+        after commit; a failed message never undoes the change. To mark a website order paid by hand, use
+        confirm-payment instead.
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionRequest' }
+      responses:
+        '200':
+          description: The updated order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Not an allowed move from the current status (`code` TRANSITION_NOT_ALLOWED), or someone else changed
+            the order first. Reload the order.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /admin/orders/{orderId}/undo:
+    post:
+      tags: [Admin orders]
+      operationId: adminUndoOrderTransition
+      summary: Undo the last status change (OWNER only)
+      description: |
+        Moves the order back to the status before its last event and records that as a new event.
+        Stock is adjusted back if the undone step changed it. No customer message is sent.
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: The updated order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Nothing to undo (`code` NOTHING_TO_UNDO).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /admin/orders/{orderId}/confirm-payment:
+    post:
+      tags: [Admin orders]
+      operationId: adminConfirmPayment
+      summary: Record a payment received outside the website (Confirm payment button)
+      description: Records a MANUAL payment for the order total and moves the order from AWAITING_PAYMENT to PAID.
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManualPayment' }
+      responses:
+        '200':
+          description: The updated order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminOrder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            The order is not awaiting payment (`code` ORDER_NOT_PAYABLE) or the reference is already recorded
+            (`code` DUPLICATE_PAYMENT_REFERENCE).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /admin/riders:
+    get:
+      tags: [Admin orders]
+      operationId: adminListRiders
+      summary: Active riders, for the rider picker
+      description: Adding and editing riders is part of Settings (later milestone).
+      security: [{ accessCookie: [] }]
+      responses:
+        '200':
+          description: Active riders. Not paginated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RiderList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    accessCookie:
+      type: apiKey
+      in: cookie
+      name: blinks_at
+      description: Access JWT (15 minutes), set by login and refresh.
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: blinks_rt
+      description: Rotating refresh token, sent only to /auth/refresh.
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: The `csrfToken` from AuthSession. Required on mutating admin requests.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' }
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: A random value (e.g. a UUID) per checkout attempt. Repeating it returns the first result.
+      schema: { type: string, maxLength: 64 }
+
+  responses:
+    BadRequest:
+      description: Malformed request or query parameters.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Not logged in, or the session has expired.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Missing or wrong CSRF token, or the staff role may not do this.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Not found.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ValidationFailed:
+      description: One or more fields are invalid; see `errors`.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: Too many attempts. Try again after `Retry-After` seconds.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    # ---------------------------------------------------------- Errors
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type: { type: string, example: about:blank }
+        title: { type: string, example: Unprocessable Entity }
+        status: { type: integer, example: 422 }
+        detail: { type: string, example: That doesn't look like a Ghana phone number. }
+        instance: { type: string, example: /api/v1/orders }
+        code:
+          type: string
+          description: Stable machine-readable reason, e.g. OUT_OF_STOCK, TRANSITION_NOT_ALLOWED, VALIDATION.
+          example: VALIDATION
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/FieldProblem' }
+    FieldProblem:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string, description: 'JSON path of the field, e.g. items[0].quantity', example: customer.phone }
+        message: { type: string, example: Use a number like 024 123 4567. }
+
+    # ---------------------------------------------------------- Enums
+    Gender:
+      type: string
+      enum: [MEN, WOMEN, UNISEX, NONE]
+      description: UNISEX is shown as "Both". Accessories are NONE.
+    SellsFor:
+      type: string
+      enum: [MEN, WOMEN, BOTH]
+    Category:
+      type: string
+      # TODO(open): "frames and more" may add categories such as prescription frames (BRIEF §5).
+      enum: [SUNGLASSES, ACCESSORY]
+    Style:
+      type: string
+      enum: [AVIATOR, ROUND, SQUARE, CAT_EYE, WRAP, CASE_OR_ACCESSORY]
+    Label:
+      type: string
+      enum: [NEW, POLARIZED, BESTSELLER]
+    PriceBand:
+      type: string
+      enum: [UNDER_150, BETWEEN_150_AND_250, OVER_250]
+      description: 'Derived from price: under GH₵150, GH₵150–250 inclusive, over GH₵250.'
+    ProductStatus:
+      type: string
+      enum: [DRAFT, PUBLISHED]
+    StockStatus:
+      type: string
+      enum: [IN_STOCK, LOW, SOLD_OUT]
+      description: LOW means stock is at or below the product's low-stock threshold but above zero.
+    ProductSort:
+      type: string
+      enum: [BEST, NEW, PRICE_ASC, PRICE_DESC]
+      default: BEST
+      description: BEST is most units sold in the last 30 days.
+    MediaType:
+      type: string
+      enum: [PHOTO, VIDEO]
+    MediaRole:
+      type: string
+      enum: [COVER, WORN, SIDE, OTHER]
+    OrderStatus:
+      type: string
+      enum: [AWAITING_PAYMENT, PAID, PACKED, OUT_FOR_DELIVERY, READY_FOR_PICKUP, DELIVERED, CANCELLED]
+      description: DELIVERED is shown as "Picked up" for pickup orders.
+    OrderSource:
+      type: string
+      enum: [WEBSITE, WHATSAPP, SHOP]
+    Fulfilment:
+      type: string
+      enum: [PICKUP, DELIVERY]
+    MomoNetwork:
+      type: string
+      # TODO(open): AT Money (BRIEF §8).
+      enum: [MTN, TELECEL]
+      description: Networks a customer can pay with on the website.
+    PaymentNetwork:
+      type: string
+      enum: [MTN, TELECEL, AT, CARD, CASH]
+    PaymentProvider:
+      type: string
+      enum: [PAYSTACK, HUBTEL, MANUAL, FAKE]
+    PaymentStatus:
+      type: string
+      enum: [PENDING, SUCCESS, FAILED, REFUNDED]
+    StaffRole:
+      type: string
+      enum: [OWNER, STAFF]
+    DeliveryMethod:
+      type: string
+      enum: [RIDER, BUS_PARCEL]
+    RiderKind:
+      type: string
+      enum: [OWN, BOLT_YANGO, COURIER]
+    NotificationChannel:
+      type: string
+      # TODO(open): WhatsApp, SMS or both (BRIEF §7.3).
+      enum: [WHATSAPP, SMS, NONE]
+
+    # ---------------------------------------------------------- Auth
+    LoginRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          description: Phone number (local or +233 form) or email address.
+          example: 024 123 4567
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 72
+    StaffUser:
+      type: object
+      required: [id, name, phone, role]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: string, example: '+233241234567' }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/StaffRole' }
+    AuthSession:
+      type: object
+      required: [staff, csrfToken, accessExpiresAt]
+      properties:
+        staff: { $ref: '#/components/schemas/StaffUser' }
+        csrfToken:
+          type: string
+          description: Send as `X-CSRF-Token` on mutating admin requests. Keep in memory only.
+        accessExpiresAt:
+          type: string
+          format: date-time
+          description: When the access cookie expires; refresh a little before.
+
+    # ---------------------------------------------------------- Catalogue (public)
+    BrandRef:
+      type: object
+      required: [id, name, slug]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Volta }
+        slug: { type: string, example: volta }
+    Brand:
+      type: object
+      required: [id, name, slug, sellsFor, isOwnLabel, productCount]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Volta }
+        slug: { type: string, example: volta }
+        logoUrl: { type: string, format: uri }
+        sellsFor: { $ref: '#/components/schemas/SellsFor' }
+        isOwnLabel: { type: boolean }
+        productCount: { type: integer, description: 'Products on sale.' }
+    BrandList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Brand' } }
+        total: { type: integer }
+    Media:
+      type: object
+      required: [id, type, role, url, width, height]
+      properties:
+        id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/MediaType' }
+        role: { $ref: '#/components/schemas/MediaRole' }
+        url: { type: string, format: uri }
+        width: { type: integer }
+        height: { type: integer }
+        # Responsive sizes (400/800/1600 px) are added in M2 once the media storage is chosen.
+    Image:
+      type: object
+      required: [url, width, height]
+      properties:
+        url: { type: string, format: uri }
+        width: { type: integer }
+        height: { type: integer }
+    ProductColor:
+      type: object
+      # TODO(open): stock per colour (BRIEF §14 q10).
+      required: [name, hex]
+      properties:
+        name: { type: string, example: Tortoise }
+        hex: { type: string, pattern: '^#[0-9A-Fa-f]{6}$', example: '#6B4226' }
+    ProductSummary:
+      type: object
+      description: A product card or table row.
+      required: [id, slug, modelName, brand, category, gender, style, pricePesewas, priceBand, labels, stockStatus, colors]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string, example: volta-aviator }
+        modelName: { type: string, example: Aviator Classic }
+        brand: { $ref: '#/components/schemas/BrandRef' }
+        category: { $ref: '#/components/schemas/Category' }
+        gender: { $ref: '#/components/schemas/Gender' }
+        style: { $ref: '#/components/schemas/Style' }
+        pricePesewas: { type: integer, format: int64, example: 15000 }
+        priceBand: { $ref: '#/components/schemas/PriceBand' }
+        labels: { type: array, items: { $ref: '#/components/schemas/Label' } }
+        stockStatus: { $ref: '#/components/schemas/StockStatus' }
+        stockLeft:
+          type: integer
+          description: Only present when stockStatus is LOW, for "Only 3 left".
+        cover: { $ref: '#/components/schemas/Image' }
+        colors: { type: array, items: { $ref: '#/components/schemas/ProductColor' } }
+    ProductSummaryList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ProductSummary' } }
+        total: { type: integer }
+    ProductDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProductSummary'
+        - type: object
+          required: [description, media]
+          properties:
+            description: { type: string }
+            media:
+              type: array
+              description: Ordered gallery; the COVER photo first.
+              items: { $ref: '#/components/schemas/Media' }
+            # TODO(open): Fit (Narrow / Regular / Wide) if the shop has sizes (BRIEF §4.1).
+    MenuCount:
+      type: object
+      required: [key, label, count]
+      properties:
+        key: { type: string, description: 'Brand slug, Style or PriceBand value.', example: volta }
+        label: { type: string, example: Volta }
+        count: { type: integer, example: 4 }
+    MenuSection:
+      type: object
+      required: [total, brands, styles, bands]
+      properties:
+        total: { type: integer }
+        brands: { type: array, items: { $ref: '#/components/schemas/MenuCount' } }
+        styles: { type: array, items: { $ref: '#/components/schemas/MenuCount' } }
+        bands: { type: array, items: { $ref: '#/components/schemas/MenuCount' } }
+    MenuTotal:
+      type: object
+      required: [total]
+      properties:
+        total: { type: integer }
+    Menu:
+      type: object
+      required: [men, women, accessories, brands]
+      properties:
+        men: { $ref: '#/components/schemas/MenuSection' }
+        women: { $ref: '#/components/schemas/MenuSection' }
+        accessories: { $ref: '#/components/schemas/MenuTotal' }
+        brands:
+          type: array
+          description: Every brand with products on sale, for "Shop by brand".
+          items: { $ref: '#/components/schemas/MenuCount' }
+
+    # ---------------------------------------------------------- Delivery and cart
+    DeliveryZone:
+      type: object
+      required: [id, name, method, feePesewas]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Kumasi (same day) }
+        method: { $ref: '#/components/schemas/DeliveryMethod' }
+        feePesewas: { type: integer, format: int64, example: 2000 }
+        freeAbovePesewas:
+          type: integer
+          format: int64
+          description: Delivery is free when the subtotal is at least this. Absent when there is no threshold.
+    DeliveryZoneRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    DeliveryZoneList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DeliveryZone' } }
+        total: { type: integer }
+    CartItemInput:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1, maximum: 20 }
+        colorName: { type: string, description: 'One of the product''s colour names.' }
+    CartQuoteRequest:
+      type: object
+      required: [items, fulfilment]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/CartItemInput' }
+        fulfilment: { $ref: '#/components/schemas/Fulfilment' }
+        deliveryZoneId:
+          type: string
+          format: uuid
+          description: Required when fulfilment is DELIVERY.
+    QuoteLine:
+      type: object
+      required: [productId, slug, modelName, brandName, quantity, unitPricePesewas, lineTotalPesewas, stockStatus]
+      properties:
+        productId: { type: string, format: uuid }
+        slug: { type: string }
+        modelName: { type: string }
+        brandName: { type: string }
+        colorName: { type: string }
+        quantity: { type: integer }
+        unitPricePesewas: { type: integer, format: int64 }
+        lineTotalPesewas: { type: integer, format: int64 }
+        stockStatus: { $ref: '#/components/schemas/StockStatus' }
+        cover: { $ref: '#/components/schemas/Image' }
+        issue: { $ref: '#/components/schemas/QuoteIssue' }
+        available:
+          type: integer
+          description: How many can be bought, when issue is NOT_ENOUGH_STOCK.
+    QuoteIssue:
+      type: string
+      enum: [SOLD_OUT, NOT_ENOUGH_STOCK, UNAVAILABLE]
+      description: Why a cart line can't be bought as is. NOT_ENOUGH_STOCK comes with `available`.
+    Totals:
+      type: object
+      required: [subtotalPesewas, deliveryFeePesewas, discountPesewas, totalPesewas]
+      properties:
+        subtotalPesewas: { type: integer, format: int64 }
+        deliveryFeePesewas: { type: integer, format: int64 }
+        discountPesewas:
+          type: integer
+          format: int64
+          description: Always 0 for now. TODO(open) the "Buy 2" deal and discount codes.
+        totalPesewas: { type: integer, format: int64 }
+    CartQuote:
+      allOf:
+        - $ref: '#/components/schemas/Totals'
+        - type: object
+          required: [lines, canCheckout]
+          properties:
+            lines: { type: array, items: { $ref: '#/components/schemas/QuoteLine' } }
+            canCheckout:
+              type: boolean
+              description: False when any line has an issue.
+
+    # ---------------------------------------------------------- Orders (public)
+    CustomerInput:
+      type: object
+      required: [name, phone]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, example: Kofi Mensah }
+        phone: { type: string, example: 024 123 4567 }
+    Address:
+      type: object
+      description: Required when fulfilment is DELIVERY (BRIEF §9).
+      required: [area, landmark]
+      properties:
+        area: { type: string, minLength: 1, maxLength: 100, description: 'Area or town.', example: Adum }
+        landmark: { type: string, minLength: 1, maxLength: 200, example: Opposite the Prempeh Assembly Hall }
+        addressLine: { type: string, maxLength: 200 }
+        ghanaPostGps: { type: string, maxLength: 20, description: 'GhanaPost GPS digital address.', example: AK-039-5028 }
+    CreateOrderRequest:
+      type: object
+      required: [customer, items, fulfilment]
+      properties:
+        customer: { $ref: '#/components/schemas/CustomerInput' }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/CartItemInput' }
+        fulfilment: { $ref: '#/components/schemas/Fulfilment' }
+        deliveryZoneId:
+          type: string
+          format: uuid
+          description: Required when fulfilment is DELIVERY.
+        address: { $ref: '#/components/schemas/Address' }
+    OrderItem:
+      type: object
+      required: [productId, modelName, brandName, quantity, unitPricePesewas, listPricePesewas, lineTotalPesewas]
+      properties:
+        productId: { type: string, format: uuid }
+        modelName: { type: string, description: 'Snapshot taken when the order was placed.' }
+        brandName: { type: string, description: 'Snapshot taken when the order was placed.' }
+        colorName: { type: string }
+        quantity: { type: integer }
+        unitPricePesewas: { type: integer, format: int64, description: 'Price charged per unit, as of the order.' }
+        listPricePesewas:
+          type: integer
+          format: int64
+          description: |
+            Catalogue price per unit when the order was placed. Differs from unitPricePesewas only when
+            the price was agreed in a WhatsApp or shop order.
+        lineTotalPesewas: { type: integer, format: int64 }
+    PublicOrder:
+      allOf:
+        - $ref: '#/components/schemas/Totals'
+        - type: object
+          required: [id, number, status, fulfilment, items, createdAt]
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: Keep it for /pay and /payment. It is not guessable, unlike the number.
+            number: { type: integer, format: int64, example: 1091, description: 'Shown as "#1091".' }
+            status: { $ref: '#/components/schemas/OrderStatus' }
+            fulfilment: { $ref: '#/components/schemas/Fulfilment' }
+            deliveryZoneName: { type: string }
+            items: { type: array, items: { $ref: '#/components/schemas/OrderItem' } }
+            createdAt: { type: string, format: date-time }
+            payBy:
+              type: string
+              format: date-time
+              description: The order is cancelled if not paid by then (30 minutes after creation).
+    PayOrderRequest:
+      type: object
+      required: [network, momoNumber]
+      properties:
+        network: { $ref: '#/components/schemas/MomoNetwork' }
+        momoNumber: { type: string, description: 'The mobile money number to charge.', example: 024 123 4567 }
+    PaymentState:
+      type: object
+      required: [orderId, orderStatus]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderStatus: { $ref: '#/components/schemas/OrderStatus' }
+        payment: { $ref: '#/components/schemas/PaymentAttempt' }
+        nextAction: { $ref: '#/components/schemas/NextAction' }
+    PaymentAttempt:
+      type: object
+      description: The latest payment attempt. Absent before the first attempt.
+      required: [status, network, amountPesewas]
+      properties:
+        status: { $ref: '#/components/schemas/PaymentStatus' }
+        network: { $ref: '#/components/schemas/PaymentNetwork' }
+        amountPesewas: { type: integer, format: int64 }
+        failureReason:
+          type: string
+          description: Shown to the customer when status is FAILED, e.g. "The prompt was declined."
+    NextAction:
+      type: object
+      description: |
+        What the customer must do while the payment is PENDING. TODO(open): depends on the provider;
+        some flows redirect to a hosted checkout instead of a phone prompt.
+      required: [type]
+      properties:
+        type: { $ref: '#/components/schemas/NextActionType' }
+        redirectUrl: { type: string, format: uri, description: 'Present when type is REDIRECT.' }
+    NextActionType:
+      type: string
+      enum: [APPROVE_ON_PHONE, REDIRECT]
+    TrackingStep:
+      type: object
+      required: [status, at]
+      properties:
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        at: { type: string, format: date-time }
+    TrackingItem:
+      type: object
+      required: [modelName, brandName, quantity]
+      properties:
+        modelName: { type: string }
+        brandName: { type: string }
+        colorName: { type: string }
+        quantity: { type: integer }
+    OrderTracking:
+      type: object
+      required: [number, status, fulfilment, items, totalPesewas, createdAt, timeline]
+      properties:
+        number: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        fulfilment: { $ref: '#/components/schemas/Fulfilment' }
+        items: { type: array, items: { $ref: '#/components/schemas/TrackingItem' } }
+        totalPesewas: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        timeline:
+          type: array
+          description: Status changes, oldest first. Undone steps are left out.
+          items: { $ref: '#/components/schemas/TrackingStep' }
+
+    # ---------------------------------------------------------- Admin catalogue
+    BrandInput:
+      type: object
+      required: [name, sellsFor]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: Made from the name when left out.
+        logoUrl: { type: string, format: uri }
+        sellsFor: { $ref: '#/components/schemas/SellsFor' }
+        isOwnLabel: { type: boolean, default: false }
+    AdminBrand:
+      type: object
+      required: [id, name, slug, sellsFor, isOwnLabel, productCount, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        logoUrl: { type: string, format: uri }
+        sellsFor: { $ref: '#/components/schemas/SellsFor' }
+        isOwnLabel: { type: boolean }
+        productCount: { type: integer, description: 'All products, including drafts and hidden ones.' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminBrandList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AdminBrand' } }
+        total: { type: integer }
+    ProductInput:
+      type: object
+      required: [modelName, brandId, category, gender, style, pricePesewas, stock]
+      properties:
+        modelName: { type: string, minLength: 1, maxLength: 100 }
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: Made from brand and model name when left out.
+        brandId: { type: string, format: uuid }
+        category: { $ref: '#/components/schemas/Category' }
+        gender:
+          $ref: '#/components/schemas/Gender'
+        style: { $ref: '#/components/schemas/Style' }
+        pricePesewas: { type: integer, format: int64, minimum: 1 }
+        stock: { type: integer, minimum: 0 }
+        lowStockThreshold:
+          type: integer
+          minimum: 0
+          description: '"Warn me when it gets down to". Defaults to the shop setting (5).'
+        description: { type: string, maxLength: 2000 }
+        labels: { type: array, uniqueItems: true, items: { $ref: '#/components/schemas/Label' } }
+        sku: { type: string, maxLength: 40, description: 'Optional own code.' }
+        colors:
+          type: array
+          maxItems: 12
+          description: Replaces the product's colours, in this order.
+          items: { $ref: '#/components/schemas/ProductColor' }
+        isVisible: { type: boolean, default: true }
+        status: { $ref: '#/components/schemas/ProductStatus' }
+    ProductPatch:
+      type: object
+      description: Only the fields sent are changed.
+      minProperties: 1
+      properties:
+        isVisible: { type: boolean }
+        status: { $ref: '#/components/schemas/ProductStatus' }
+        stock: { type: integer, minimum: 0, description: 'Sets the count after a stocktake.' }
+    AdminProduct:
+      type: object
+      required: [id, slug, modelName, brand, category, gender, style, pricePesewas, priceBand, stock, lowStockThreshold,
+        stockStatus, description, labels, colors, media, isVisible, status, unitsSoldThisMonth,
+        revenueThisMonthPesewas, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        modelName: { type: string }
+        brand: { $ref: '#/components/schemas/BrandRef' }
+        category: { $ref: '#/components/schemas/Category' }
+        gender: { $ref: '#/components/schemas/Gender' }
+        style: { $ref: '#/components/schemas/Style' }
+        pricePesewas: { type: integer, format: int64 }
+        priceBand: { $ref: '#/components/schemas/PriceBand' }
+        stock: { type: integer }
+        lowStockThreshold: { type: integer }
+        stockStatus: { $ref: '#/components/schemas/StockStatus' }
+        description: { type: string }
+        labels: { type: array, items: { $ref: '#/components/schemas/Label' } }
+        sku: { type: string }
+        colors: { type: array, items: { $ref: '#/components/schemas/ProductColor' } }
+        media: { type: array, items: { $ref: '#/components/schemas/Media' } }
+        isVisible: { type: boolean }
+        status: { $ref: '#/components/schemas/ProductStatus' }
+        unitsSoldThisMonth:
+          type: integer
+          description: Units in orders paid this calendar month (Africa/Accra), excluding cancelled and refunded.
+        revenueThisMonthPesewas:
+          type: integer
+          format: int64
+          description: Same rule as unitsSoldThisMonth, for the group header totals.
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AdminProductList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AdminProduct' } }
+        total: { type: integer }
+
+    # ---------------------------------------------------------- Admin orders
+    Customer:
+      type: object
+      required: [id, name, phone]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: string, example: '+233241234567' }
+    Rider:
+      type: object
+      required: [id, name, phone, kind]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: string }
+        kind: { $ref: '#/components/schemas/RiderKind' }
+    RiderList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Rider' } }
+        total: { type: integer }
+    Payment:
+      type: object
+      required: [id, provider, network, amountPesewas, reference, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        provider: { $ref: '#/components/schemas/PaymentProvider' }
+        network: { $ref: '#/components/schemas/PaymentNetwork' }
+        amountPesewas: { type: integer, format: int64 }
+        reference: { type: string }
+        status: { $ref: '#/components/schemas/PaymentStatus' }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: string, format: date-time }
+    StaffRef:
+      type: object
+      description: A staff member who made a change. Absent for system changes (payments, auto-cancel).
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    OrderEvent:
+      type: object
+      required: [id, toStatus, notifiedVia, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        fromStatus: { $ref: '#/components/schemas/OrderStatus' }
+        toStatus: { $ref: '#/components/schemas/OrderStatus' }
+        actor:
+          $ref: '#/components/schemas/StaffRef'
+        note: { type: string }
+        notifiedVia: { $ref: '#/components/schemas/NotificationChannel' }
+        createdAt: { type: string, format: date-time }
+    AdminOrderSummary:
+      type: object
+      required: [id, number, source, status, fulfilment, customer, itemCount, totalPesewas, needsAttention,
+        allowedTransitions, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: integer, format: int64 }
+        source: { $ref: '#/components/schemas/OrderSource' }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        fulfilment: { $ref: '#/components/schemas/Fulfilment' }
+        customer: { $ref: '#/components/schemas/Customer' }
+        itemCount: { type: integer, description: 'Total units.' }
+        totalPesewas: { type: integer, format: int64 }
+        needsAttention: { type: boolean }
+        allowedTransitions:
+          type: array
+          description: Statuses this order can move to now; drives the next-step button. Cancel is included when allowed.
+          items: { $ref: '#/components/schemas/OrderStatus' }
+        createdAt: { type: string, format: date-time }
+        paidAt: { type: string, format: date-time }
+    AdminOrderSummaryList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AdminOrderSummary' } }
+        total: { type: integer }
+    NotificationPreview:
+      type: object
+      required: [toStatus, channel, message]
+      properties:
+        toStatus: { $ref: '#/components/schemas/OrderStatus' }
+        channel: { $ref: '#/components/schemas/NotificationChannel' }
+        message:
+          type: string
+          example: 'Hi Kofi, your order #1090 from The Blinks is packed. We will message you again when the rider is on the way.'
+    AdminOrder:
+      allOf:
+        - $ref: '#/components/schemas/AdminOrderSummary'
+        - $ref: '#/components/schemas/Totals'
+        - type: object
+          required: [items, payments, events, notificationPreviews, canUndo, updatedAt]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/OrderItem' } }
+            deliveryZone: { $ref: '#/components/schemas/DeliveryZoneRef' }
+            address: { $ref: '#/components/schemas/Address' }
+            rider: { $ref: '#/components/schemas/Rider' }
+            privateNote: { type: string }
+            attentionReason: { type: string, description: 'Why needsAttention is set.' }
+            payments:
+              type: array
+              description: All payment attempts, newest first.
+              items: { $ref: '#/components/schemas/Payment' }
+            events:
+              type: array
+              description: The tracking timeline, oldest first.
+              items: { $ref: '#/components/schemas/OrderEvent' }
+            notificationPreviews:
+              type: array
+              description: The message the customer would get for each allowed transition (filled from M5).
+              items: { $ref: '#/components/schemas/NotificationPreview' }
+            canUndo:
+              type: boolean
+              description: True when the logged-in staff member may undo the last step.
+            updatedAt: { type: string, format: date-time }
+            deliveredAt: { type: string, format: date-time }
+            cancelledAt: { type: string, format: date-time }
+    ManualPayment:
+      type: object
+      required: [network]
+      properties:
+        network: { $ref: '#/components/schemas/PaymentNetwork' }
+        reference:
+          type: string
+          maxLength: 100
+          description: The MoMo transaction ID. Required unless network is CASH.
+    ManualOrderItemInput:
+      allOf:
+        - $ref: '#/components/schemas/CartItemInput'
+        - type: object
+          properties:
+            unitPricePesewas:
+              type: integer
+              format: int64
+              minimum: 0
+              description: |
+                Price agreed in the chat, per unit. Leave out to use the catalogue price. 0 is allowed
+                (e.g. a free case). The catalogue price is still recorded as listPricePesewas.
+    ManualOrderSource:
+      type: string
+      enum: [WHATSAPP, SHOP]
+    AdminCreateOrderRequest:
+      type: object
+      required: [source, customer, items, fulfilment]
+      properties:
+        source: { $ref: '#/components/schemas/ManualOrderSource' }
+        customer: { $ref: '#/components/schemas/CustomerInput' }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: '#/components/schemas/ManualOrderItemInput' }
+        fulfilment: { $ref: '#/components/schemas/Fulfilment' }
+        deliveryZoneId:
+          type: string
+          format: uuid
+          description: Required when fulfilment is DELIVERY.
+        address: { $ref: '#/components/schemas/Address' }
+        payment:
+          $ref: '#/components/schemas/ManualPayment'
+        privateNote: { type: string, maxLength: 1000 }
+    AdminOrderPatch:
+      type: object
+      minProperties: 1
+      properties:
+        privateNote: { type: string, maxLength: 1000, description: 'Empty string clears it.' }
+        needsAttention:
+          type: boolean
+          description: Send false once the problem is sorted. Only the system can set it to true (true returns 422).
+    TransitionRequest:
+      type: object
+      required: [to]
+      properties:
+        to: { $ref: '#/components/schemas/OrderStatus' }
+        note: { type: string, maxLength: 500 }
+        riderId:
+          type: string
+          format: uuid
+          description: Assign a rider, usually with `to` = OUT_FOR_DELIVERY.
+        notifyCustomer:
+          type: boolean
+          default: true
+          description: Send the customer the status message.
+    OrderPipeline:
+      type: object
+      required: [awaitingPayment, paid, packed, outForDelivery, readyForPickup, deliveredThisWeek, needsAttention, toDo]
+      properties:
+        awaitingPayment: { type: integer }
+        paid: { type: integer, description: 'Paid and ready to pack.' }
+        packed: { type: integer }
+        outForDelivery: { type: integer }
+        readyForPickup: { type: integer }
+        deliveredThisWeek: { type: integer, description: 'Since Monday 00:00 Africa/Accra.' }
+        needsAttention: { type: integer }
+        toDo:
+          type: integer
+          description: |
+            Badge on the sidebar: orders that are paid, packed, ready for pickup or flagged
+            needsAttention, each counted once.

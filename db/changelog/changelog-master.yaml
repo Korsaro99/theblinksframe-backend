@@ -1,0 +1,9 @@
+# Liquibase owns the schema. Add new files to the end of this list; never edit a changeset
+# that has run anywhere shared, write a new one instead. GORM AutoMigrate is never used.
+databaseChangeLog:
+  - include: { file: sql/0001-base.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0002-catalog.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0003-staff-auth.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0004-delivery.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0005-orders.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0006-settings.sql, relativeToChangelogFile: true }

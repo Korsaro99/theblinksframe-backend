@@ -1,0 +1,9 @@
+# Config for `make gen`. Output is committed; CI fails if it is stale.
+package: gen
+output: internal/httpapi/gen/api.gen.go
+generate:
+  gin-server: true
+  models: true
+  embedded-spec: true # lets request-validation middleware use the spec (M2)
+output-options:
+  skip-prune: true # keep every schema, even ones no operation uses yet

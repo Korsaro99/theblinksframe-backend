@@ -1,0 +1,6 @@
+# Spec lint rules (`make lint-spec`, run in CI).
+extends:
+  - recommended
+rules:
+  info-license: off # private project
+  operation-4xx-response: off # public read-only lists have no client errors

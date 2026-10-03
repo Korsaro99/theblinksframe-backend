@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/lint/go.sum
+      - name: golangci-lint (version pinned in tools/lint/go.mod)
+        run: make lint
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: OpenAPI spec is valid
+        run: make lint-spec
+      - name: Generated code matches api/openapi.yaml
+        run: |
+          make gen
+          git diff --exit-code -- internal/httpapi/gen || {
+            echo "::error::Generated code is stale. Run 'make gen' and commit the result."
+            exit 1
+          }
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # Includes integration tests: testcontainers starts Postgres and runs the
+      # Liquibase migrations using the runner's Docker.
+      - name: Tests
+        run: make test-integration
