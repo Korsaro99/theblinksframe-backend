@@ -10,6 +10,19 @@ This repo is the REST API for The Blinks storefront and admin back office (sungl
   - **PROPOSED**: confirm with the developer before locking it in.
   - **OPEN**: waiting on the client. Don't guess; leave `TODO(open):`.
 
+## Why this project exists (for the developer)
+
+Besides shipping the shop, this project is how the developer learns to **build and run production software alone, with AI**, with a focus on **security**. So:
+
+- **Explain the why.** For each non-obvious decision, give the reason and the alternative in a sentence or two. When something is new to the developer, add a short explanation with an example. New tools so far: Postgres, RFC 9457, testcontainers, refresh-token rotation.
+- **Make security visible.** When work touches auth, money, webhooks, uploads, personal data or config:
+  - say what could go wrong and how the code prevents it;
+  - update `docs/SECURITY.md` in the same change;
+  - call out security-relevant changes in the summary.
+- **Prefer standard, well-understood approaches** over clever ones, so the developer can maintain them alone and look them up.
+- **Teach production habits:** tests that prove the rule, migrations with rollbacks, CI as the gate, secrets out of git, observable logs, and a written plan before deploying.
+- **Be honest about trade-offs and limits.** If something is good enough for the free-tier trial but not later, say so.
+
 ## Stack
 
 - **DECIDED:** Go, in its own repo. It serves REST/JSON under `/api/v1` to the Angular frontend.

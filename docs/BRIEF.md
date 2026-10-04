@@ -4,7 +4,7 @@ Online shop and back office for **The Blinks**, a sunglasses shop at Kejetia Mar
 
 **Where this file lives:** a copy sits in both repos at `docs/BRIEF.md`.
 
-- `the-blinks-web` is the frontend (Angular).
+- `the-blinks-web` is the frontend (Angular). Its working name is `theblinksframe-frontend`.
 - `the-blinks-api` is the backend (Go). Its working name is `theblinksframe-backend`, which is also its Go module path.
 - Each repo's own `CLAUDE.md` covers its stack and conventions.
 - Keep both copies identical. When something is decided, update it in both and add a line to the decision log (§16).
@@ -107,7 +107,7 @@ Last updated: 2026-10-04.
 
 - **Bricolage Grotesque**, weights 600 and 800: headlines, prices and the wordmark.
 - **Figtree**, weights 400–700: body text, buttons and forms.
-- Both load from Google Fonts.
+- Both are self-hosted by the frontend (the same open-source font files Google Fonts serves), so pages make no extra connection on mobile data.
 - The wordmark is lowercase "the blinks" in Bricolage 800 with tight letter-spacing. It's a placeholder until the real logo arrives (OPEN).
 
 ### 3.3 Voice
@@ -398,12 +398,15 @@ Any state before DELIVERED ──► CANCELLED
 ### 7.6 WhatsApp click-to-chat (DECIDED)
 
 - **Link:** `https://wa.me/<shop number in international format, no +>?text=<url-encoded message>`.
-- **Message:** `Hi The Blinks! I'd like to order: {modelName} by {brand} ({colour}) – GH₵{price}. {productUrl}`
+- **Message:** `Hi The Blinks! I'd like to order: {modelName} by {brand} ({colour}) – {price}. {productUrl}`
+  - `{price}` uses the §7.7 format, for example `GH₵ 150` (DECIDED 2026-10-04).
+  - When there is no colour, leave out ` ({colour})` entirely, with no empty brackets (DECIDED 2026-10-04).
 - **Shop WhatsApp number:** OPEN. Store it in Settings.
 
 ### 7.7 Formatting
 
 - Prices display as `GH₵ 1,234`. Each repo has exactly one formatter: a `ghs` pipe in Angular, and `FormatGHS` in Go for messages and exports.
+  - Input is integer pesewas. Show two decimals only when the pesewas part is not zero: 15000 → `GH₵ 150`, 15050 → `GH₵ 150.50`, 123400 → `GH₵ 1,234` (DECIDED 2026-10-04).
 - Order numbers display as `#1091`.
 
 ## 8. Payments
@@ -447,6 +450,7 @@ Any state before DELIVERED ──► CANCELLED
   - Product images and videos on Cloudinary or S3-compatible storage, resized on upload.
   - Site on the main domain and the API on an `api.` subdomain of the same domain, so the admin session cookie works.
 - **Hosting:** OPEN, depending on budget. Angular SSR needs a small Node server; the Go API and Postgres go on a managed host or VPS.
+- **CDN** (DECIDED 2026-10-04): Cloudflare (free plan) in front of the VM, with proxied DNS. It handles TLS and caches the hashed static files at the edge. Storefront HTML gets a short cache; `/admin` and the API are never cached. The Angular SSR server runs on the VM, not on Cloudflare Workers.
 - **Analytics:** GA4 and Meta Pixel (OPEN).
 - **Stack details** live in each repo's `CLAUDE.md`.
 
@@ -609,3 +613,5 @@ Still open:
 | 2026-10-04 | Data model (§6) accepted with the additions listed there: UUID ids, order `area`, `needsAttention`, auth session tables. |
 | 2026-10-04 | Manual (WhatsApp and shop) orders may override the unit price per item, for prices agreed in chat. The catalogue price is kept as `listPricePesewas`. Website orders always use catalogue prices. |
 | 2026-10-04 | API contract v0 agreed and tagged `api-v0.1.0`. |
+| 2026-10-04 | Frontend stack: Angular 22 (zoneless, signals), SSR for the storefront with `/about` and `/find-us` prerendered, client-rendered lazy `/admin`. PrimeNG with a custom theme built from §3.1, plus Tailwind; self-hosted fonts; `ng-openapi-gen` client generated from the tagged spec; Vitest and Playwright. Working name `theblinksframe-frontend`. |
+| 2026-10-04 | Cloudflare free plan in front of the VM as the CDN; SSR stays on the VM (§10). Price format shows decimals only when not whole; the WhatsApp message uses the same format and drops the colour when there is none (§7.6, §7.7). |
