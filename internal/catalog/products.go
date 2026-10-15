@@ -13,7 +13,7 @@ import (
 
 // AdminProduct is a product for the back office, with this month's sales.
 type AdminProduct struct {
-	models.Product // with Brand, Colors and Media loaded
+	models.Product          // with Brand, Colors and Media loaded
 	UnitsSoldThisMonth      int64
 	RevenueThisMonthPesewas int64
 }
@@ -69,7 +69,7 @@ func (s *Store) ListAdminProducts(ctx context.Context, f AdminProductFilter) ([]
 
 	var products []models.Product
 	err := q.Order("lower(brands.name), lower(products.model_name)").
-		Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize).
+		Offset((f.Page-1)*f.PageSize).Limit(f.PageSize).
 		Preload("Brand").
 		Preload("Colors", func(db *gorm.DB) *gorm.DB { return db.Order("position") }).
 		Preload("Media", func(db *gorm.DB) *gorm.DB { return db.Order("role = 'COVER' DESC, position") }).

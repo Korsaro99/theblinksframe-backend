@@ -25,9 +25,7 @@ func (s *Server) AdminListProducts(c *gin.Context, params gen.AdminListProductsP
 	}
 	if params.BrandId != nil {
 		f.BrandIDs = make([]uuid.UUID, len(*params.BrandId))
-		for i, id := range *params.BrandId {
-			f.BrandIDs[i] = id
-		}
+		copy(f.BrandIDs, *params.BrandId)
 	}
 	if params.LowStock != nil {
 		f.LowStock = *params.LowStock
@@ -36,7 +34,7 @@ func (s *Server) AdminListProducts(c *gin.Context, params gen.AdminListProductsP
 		f.Query = *params.Q
 	}
 	if params.Page != nil {
-		f.Page = int(*params.Page)
+		f.Page = *params.Page
 	}
 	if params.PageSize != nil {
 		f.PageSize = *params.PageSize
