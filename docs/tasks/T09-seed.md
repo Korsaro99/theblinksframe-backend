@@ -6,7 +6,7 @@
 ## Goal
 
 `make seed` fills a local database with fake but realistic data, so the frontend and the dashboard have something to show:
-- the brands and products from the design mockups;
+- the brands and products from the design canvas, the same ones the frontend's mock API uses;
 - delivery zones and riders;
 - orders whose September 2026 revenue adds up to exactly **GH₵12,600**, the number on the dashboard mockup.
 
@@ -42,6 +42,8 @@ It must **never** run in production (BRIEF §6).
 
 ## The data
 
+This is the design canvas's sample shop. **The frontend uses exactly the same products and numbers** (`scripts/mock-fixtures.mjs` in `theblinksframe-frontend`), so the dashboard looks the same against the mock and against the real API. Keep them in step.
+
 Prices are in GH₵ below; **store pesewas** (× 100).
 
 **Brands:**
@@ -49,67 +51,63 @@ Prices are in GH₵ below; **store pesewas** (× 100).
 | Name | Slug | Sells for | Own label |
 |---|---|---|---|
 | Harmattan | harmattan | MEN | no |
-| Volta | volta | BOTH | no |
+| Volta | volta | MEN | no |
 | Zuri | zuri | WOMEN | no |
-| Coastline | coastline | BOTH | no |
+| Coastline | coastline | WOMEN | no |
 | The Blinks | the-blinks | BOTH | **yes** |
 
-**Products** (slug = brand slug + model, e.g. `harmattan-aviator`):
+**Products** (slug = brand slug + model, e.g. `harmattan-gate-4-round`):
 
-| # | Brand | Model | Category | Gender | Style | Price | Stock | Status | Labels |
+| # | Brand | Model | Gender | Style | Price | Stock | Sold in Sept | Labels | Colours |
 |---|---|---|---|---|---|---|---|---|---|
-| HA | Harmattan | Aviator | SUNGLASSES | MEN | AVIATOR | 180 | 12 | PUBLISHED | BESTSELLER |
-| HW | Harmattan | Wrap Sport | SUNGLASSES | MEN | WRAP | 260 | 4 | PUBLISHED | POLARIZED |
-| VR | Volta | Round | SUNGLASSES | UNISEX | ROUND | 150 | 20 | PUBLISHED | NEW |
-| VS | Volta | Square | SUNGLASSES | UNISEX | SQUARE | 120 | 0 | PUBLISHED | |
-| ZC | Zuri | Cat Eye | SUNGLASSES | WOMEN | CAT_EYE | 220 | 9 | PUBLISHED | BESTSELLER |
-| ZO | Zuri | Oversized Square | SUNGLASSES | WOMEN | SQUARE | 300 | 6 | PUBLISHED | POLARIZED, NEW |
-| CA | Coastline | Aviator | SUNGLASSES | UNISEX | AVIATOR | 140 | 15 | PUBLISHED | |
-| CR | Coastline | Round | SUNGLASSES | WOMEN | ROUND | 100 | 3 | DRAFT | |
-| BC | The Blinks | Hard Case | ACCESSORY | NONE | CASE_OR_ACCESSORY | 40 | 30 | PUBLISHED | |
+| GR | Harmattan | Gate 4 Round | MEN | ROUND | 120 | 24 | 18 | BESTSELLER | Black, Tortoise |
+| BF | Harmattan | Bantama Flat-Top | MEN | SQUARE | 220 | 9 | 6 | POLARIZED | Black |
+| MR | Harmattan | Midnight Round | MEN | ROUND | 300 | 14 | 2 | NEW, POLARIZED | Black |
+| AS | Volta | Adum Square | MEN | SQUARE | 150 | 17 | 14 | | Forest, Black |
+| SW | Volta | Sunday Wrap | MEN | WRAP | 250 | 6 | 4 | POLARIZED | Cream |
+| KC | Zuri | Kejetia Cat-Eye | WOMEN | CAT_EYE | 180 | 3 | 11 | BESTSELLER | Tortoise |
+| PC | Zuri | Pearl Cat-Eye | WOMEN | CAT_EYE | 280 | 5 | 3 | NEW | Pearl, Black |
+| AG | Coastline | Asante Gold Round | WOMEN | ROUND | 200 | 11 | 8 | | Gold |
+| HC | The Blinks | Hard case | NONE (ACCESSORY) | CASE_OR_ACCESSORY | 25 | 60 | 40 | | Brown |
 
-- **Every product:**
-  - `low_stock_threshold` 5, `is_visible` true;
-  - a one-sentence `description`;
-  - at least these colours: HA (Gold, Black), ZC (Tortoise, Black), VR (Black).
-- **Every PUBLISHED product:**
-  - a `COVER` photo: `type PHOTO`, `url https://placehold.co/1600x1200/png?text=<slug>`, `width 1600`, `height 1200`;
-  - optionally a `WORN` photo the same way.
+- **Colour hex values:** Black `#1A1410`, Tortoise `#6B4226`, Forest `#0B5D3B`, Cream `#F2E6C9`, Pearl `#F5F0E6`, Gold `#C9962A`, Brown `#3B2A1E`.
+- **Every product:** `PUBLISHED`, visible, `low_stock_threshold` 5, and a one-sentence `description`.
+- **Photos:** a `COVER` photo on each, with `type PHOTO`, `url https://placehold.co/1600x1200/png?text=<slug>`, `width 1600`, `height 1200`.
 
 **Delivery zones:**
 
 | Name | Method | Fee | Free above |
 |---|---|---|---|
-| Kumasi (same day) | RIDER | 20 | none |
+| Kumasi (same day) | RIDER | 20 | 300 |
 | Accra and beyond (bus parcel) | BUS_PARCEL | 35 | 500 |
 
 **Riders:**
 - Yaw, `+233240000101`, OWN;
 - Abena, `+233240000102`, BOLT_YANGO.
 
-**Orders.** Use one customer per order, with a name and a unique `+23324…` phone. All times are in 2026, UTC.
+**Orders.** Use one customer per order, with a name and a unique `+23324…` phone. All times are in 2026, UTC. Every price is the catalogue price.
 
-| # | Source | Fulfilment | Items (qty × product @ price if not list) | Delivery fee | Total | Status | Paid at |
+All of orders 1 to 14 are free of delivery fees: either pickup, or above their zone's free-delivery amount. So their totals and their item revenue both add up to **12,600**, and the units per product match the "Sold in Sept" column (106 pairs).
+
+| # | Source | Fulfilment | Items | Fee | Total | Status | Paid at |
 |---|---|---|---|---|---|---|---|
-| 1 | WEBSITE | DELIVERY Kumasi | 2 × HA | 20 | 380 | DELIVERED | 09-02 10:00 |
-| 2 | WHATSAPP | PICKUP | 1 × ZC @ 200 (agreed in chat) | 0 | 200 | DELIVERED | 09-03 11:00 |
-| 3 | SHOP | PICKUP | 3 × VR | 0 | 450 | DELIVERED | 09-04 12:00 |
-| 4 | WEBSITE | DELIVERY Accra | 2 × ZO | 0 (free above 500) | 600 | OUT_FOR_DELIVERY | 09-28 09:00 |
-| 5 | WHATSAPP | PICKUP | 1 × HW | 0 | 260 | READY_FOR_PICKUP | 09-29 15:00 |
-| 6 | SHOP | PICKUP | 5 × CA | 0 | 700 | DELIVERED | 09-06 13:00 |
-| 7 | WEBSITE | DELIVERY Kumasi | 3 × ZC | 20 | 680 | DELIVERED | 09-08 10:30 |
-| 8 | WHATSAPP | DELIVERY Kumasi | 4 × HA | 20 | 740 | PACKED | 09-29 10:00 |
-| 9 | SHOP | PICKUP | 5 × ZO | 0 | 1500 | DELIVERED | 09-12 14:00 |
-| 10 | WEBSITE | PICKUP | 4 × VR, 5 × BC | 0 | 800 | PAID | 09-30 08:00 |
-| 11 | WHATSAPP | PICKUP | 5 × HW | 0 | 1300 | DELIVERED | 09-15 16:00 |
-| 12 | SHOP | PICKUP | 10 × HA | 0 | 1800 | DELIVERED | 09-18 11:00 |
-| 13 | WEBSITE | DELIVERY Accra | 4 × ZO, 5 × CA | 0 (free above 500) | 1900 | DELIVERED | 09-20 09:00 |
-| 14 | WHATSAPP | PICKUP | 5 × ZC, 1 × VR, 1 × BC | 0 | 1290 | DELIVERED | 09-24 17:00 |
-| 15 | WEBSITE | PICKUP | 1 × HA | 0 | 180 | CANCELLED | not paid; `cancelled_at` 09-10 12:30 |
-| 16 | WEBSITE | DELIVERY Kumasi | 1 × VR | 20 | 170 | AWAITING_PAYMENT | not paid |
-| 17 | SHOP | PICKUP | 2 × HA | 0 | 360 | DELIVERED | 08-15 10:00 (August) |
-
-Orders 1 to 14 add up to **12,600**: 380 + 200 + 450 + 600 + 260 + 700 + 680 + 740 + 1500 + 800 + 1300 + 1800 + 1900 + 1290.
+| 1 | WEBSITE | DELIVERY Kumasi | 3 × GR, 3 × HC | 0 (above 300) | 435 | DELIVERED | 09-02 10:00 |
+| 2 | WHATSAPP | PICKUP | 2 × KC | 0 | 360 | DELIVERED | 09-03 11:00 |
+| 3 | SHOP | PICKUP | 4 × AS, 4 × HC | 0 | 700 | DELIVERED | 09-04 12:00 |
+| 4 | WEBSITE | DELIVERY Accra | 2 × PC | 0 (above 500) | 560 | OUT_FOR_DELIVERY | 09-28 09:00 |
+| 5 | WHATSAPP | PICKUP | 1 × SW | 0 | 250 | READY_FOR_PICKUP | 09-29 15:00 |
+| 6 | SHOP | PICKUP | 5 × GR, 10 × HC | 0 | 850 | DELIVERED | 09-06 13:00 |
+| 7 | WEBSITE | DELIVERY Kumasi | 2 × AG | 0 (above 300) | 400 | DELIVERED | 09-08 10:30 |
+| 8 | WHATSAPP | DELIVERY Kumasi | 2 × BF | 0 (above 300) | 440 | PACKED | 09-29 10:00 |
+| 9 | SHOP | PICKUP | 6 × AS, 4 × KC | 0 | 1620 | DELIVERED | 09-12 14:00 |
+| 10 | WEBSITE | PICKUP | 2 × MR, 3 × HC | 0 | 675 | PAID | 09-30 08:00 |
+| 11 | WHATSAPP | PICKUP | 6 × GR, 10 × HC | 0 | 970 | DELIVERED | 09-15 16:00 |
+| 12 | SHOP | PICKUP | 4 × BF, 4 × AS, 10 × HC | 0 | 1730 | DELIVERED | 09-18 11:00 |
+| 13 | WEBSITE | DELIVERY Accra | 6 × AG, 3 × SW | 0 (above 500) | 1950 | DELIVERED | 09-20 09:00 |
+| 14 | WHATSAPP | PICKUP | 5 × KC, 1 × PC, 4 × GR | 0 | 1660 | DELIVERED | 09-24 17:00 |
+| 15 | WEBSITE | PICKUP | 1 × GR | 0 | 120 | CANCELLED | not paid; `cancelled_at` 09-10 12:30 |
+| 16 | WEBSITE | DELIVERY Kumasi | 1 × AS | 20 (below 300) | 170 | AWAITING_PAYMENT | not paid |
+| 17 | SHOP | PICKUP | 2 × GR | 0 | 240 | DELIVERED | 08-15 10:00 (August) |
 
 **For every order:**
 - `created_at`: 15 minutes before `paid_at`. For 15, use 09-10 12:00; for 16, use 09-30 18:00.
@@ -121,8 +119,7 @@ Orders 1 to 14 add up to **12,600**: 380 + 200 + 450 + 600 + 260 + 700 + 680 + 7
 - `order_items`:
   - `product_name_snapshot` = the product's model name;
   - `brand_name_snapshot` = the brand's name;
-  - `list_price_pesewas` = the product's price;
-  - `unit_price_pesewas` = the price charged (only order 2 differs).
+  - `unit_price_pesewas` = `list_price_pesewas` = the product's price.
 - At least one `order_events` row, from no status to the order's status. Set `notified_via` to `NONE`.
 - **Paid orders:** a `payments` row with:
   - `status SUCCESS`, `paid_at`, `amount_pesewas = total`;
@@ -135,7 +132,7 @@ Orders 1 to 14 add up to **12,600**: 380 + 200 + 450 + 600 + 260 + 700 + 680 + 7
 - Production refuses with `ErrProduction`, and nothing is written.
 - A second run returns `ErrNotEmpty` and writes nothing.
 - The counts and conditions in the test (5 brands, 9 products, every price band, a COVER on every published product…).
-- September revenue (paid in September, not cancelled, not refunded) is exactly 1,260,000 pesewas.
+- September revenue (paid in September, not cancelled, not refunded) is exactly 1,260,000 pesewas, and the units per product match the table (106 pairs).
 - Item snapshots match their products, and every order's subtotal equals its items.
 
 ## Hints

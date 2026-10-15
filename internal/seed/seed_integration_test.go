@@ -52,10 +52,7 @@ func TestT09Seed(t *testing.T) {
 			{"an accessory", `SELECT count(*) FROM products WHERE category = 'ACCESSORY'`, atLeast(1)},
 			{"men's", `SELECT count(*) FROM products WHERE gender = 'MEN'`, atLeast(1)},
 			{"women's", `SELECT count(*) FROM products WHERE gender = 'WOMEN'`, atLeast(1)},
-			{"unisex", `SELECT count(*) FROM products WHERE gender = 'UNISEX'`, atLeast(1)},
 			{"a low-stock product", `SELECT count(*) FROM products WHERE stock > 0 AND stock <= low_stock_threshold`, atLeast(1)},
-			{"a sold-out product", `SELECT count(*) FROM products WHERE stock = 0`, atLeast(1)},
-			{"a draft", `SELECT count(*) FROM products WHERE status = 'DRAFT'`, atLeast(1)},
 			{"every price band", `SELECT count(DISTINCT CASE WHEN price_pesewas < 15000 THEN 1 WHEN price_pesewas <= 25000 THEN 2 ELSE 3 END) FROM products`, eq(3)},
 			{"a cover photo on every published product",
 				`SELECT count(*) FROM products p WHERE p.status = 'PUBLISHED'
@@ -80,6 +77,35 @@ func TestT09Seed(t *testing.T) {
 			  AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.status = 'REFUNDED')`)
 		if revenue != 1_260_000 {
 			t.Errorf("September revenue = %d pesewas, want 1260000 (GH₵12,600)", revenue)
+		}
+
+		// Units per product match the design canvas and the frontend's mock data
+		// (scripts/mock-fixtures.mjs in theblinksframe-frontend): 106 pairs in September.
+		var sold []struct {
+			ModelName string
+			Units     int64
+		}
+		if err := gdb.Raw(`SELECT p.model_name, sum(i.quantity) AS units
+			FROM order_items i JOIN orders o ON o.id = i.order_id JOIN products p ON p.id = i.product_id
+			WHERE o.paid_at >= '2026-09-01' AND o.paid_at < '2026-10-01' AND o.status <> 'CANCELLED'
+			GROUP BY p.model_name`).Scan(&sold).Error; err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]int64{
+			"Gate 4 Round": 18, "Bantama Flat-Top": 6, "Midnight Round": 2, "Adum Square": 14, "Sunday Wrap": 4,
+			"Kejetia Cat-Eye": 11, "Pearl Cat-Eye": 3, "Asante Gold Round": 8, "Hard case": 40,
+		}
+		got := map[string]int64{}
+		for _, r := range sold {
+			got[r.ModelName] = r.Units
+		}
+		if len(got) != len(want) {
+			t.Errorf("September units per product = %v, want %v", got, want)
+		}
+		for model, units := range want {
+			if got[model] != units {
+				t.Errorf("September units of %s = %d, want %d", model, got[model], units)
+			}
 		}
 		for _, c := range []struct{ what, sql string }{
 			{"a cancelled September order", `SELECT count(*) FROM orders WHERE status = 'CANCELLED' AND created_at >= '2026-09-01' AND created_at < '2026-10-01'`},
