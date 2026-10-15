@@ -37,7 +37,7 @@ Status: **Done** (in the code and tested), **Planned** (milestone noted), **Open
 | **Logs leave out query strings**, and GORM logs parameterised SQL | Phone numbers and tokens in logs | Done (M1) |
 | **CORS allowlist** from env, credentials only for listed origins | Other sites calling the API with the admin's cookies | Done (M1) |
 | **Forwarded headers ignored** unless the proxy is listed in `TRUSTED_PROXIES` | Spoofed client IPs bypassing rate limits | Done (M1, M2); set at deploy |
-| **Config validated at startup**; secrets only in env; `.env` gitignored | Running with missing or unsafe settings; secrets in git | Done (M1) |
+| **Config validated at startup**; secrets only in env; `.env` files (except `.env.example`), private keys and certificates gitignored | Running with missing or unsafe settings; secrets in git | Done (M1) |
 | **bcrypt passwords** (cost 12); passwords over 72 bytes refused, not truncated; unknown logins still run bcrypt against a dummy hash so timing does not reveal which accounts exist | Stolen database turning into stolen passwords; account enumeration | Done (M2) |
 | **One login error** for unknown account, wrong password and disabled account | Account enumeration | Done (M2) |
 | **HttpOnly, Secure, SameSite=Lax cookies** for tokens (never localStorage, never in JSON bodies); refresh cookie scoped to `/api/v1/auth/refresh`; `Cache-Control: no-store` on auth responses | XSS stealing tokens for later use; tokens cached by proxies | Done (M2) |

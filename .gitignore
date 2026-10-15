@@ -1,8 +1,53 @@
+# What git must never track. Secrets come first: once a secret is pushed, deleting it later
+# does not help (it stays in history and in clones), so it has to be rotated instead.
+
+# --- Secrets and local config ------------------------------------------------
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+liquibase.properties
+*.local.properties
+
+# --- Build output --------------------------------------------------------------
 bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# --- Tests and profiling ---------------------------------------------------------
 *.test
 *.out
 coverage.*
+*.coverprofile
+profile.cov
+*.prof
+
+# --- Go workspace (local multi-module setups) -------------------------------------
+go.work
+go.work.sum
+
+# --- Logs and scratch files --------------------------------------------------------
+*.log
+tmp/
+
+# --- Operating system ---------------------------------------------------------------
 .DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# --- Editors and tools --------------------------------------------------------------
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+# Personal Claude Code settings; shared ones in .claude/settings.json stay tracked.
+.claude/settings.local.json
