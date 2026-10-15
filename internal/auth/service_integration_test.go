@@ -43,7 +43,9 @@ func TestService(t *testing.T) {
 	auth.UseFastHashesForTest(t)
 	gdb := dbtest.Start(t).Open(t)
 	ctx := context.Background()
-	clk := &clock{now: time.Now().UTC()}
+	// 400 ns past a whole microsecond: Postgres rounds that down when storing, which used
+	// to make "exactly at the end of the grace period" look a few nanoseconds too late.
+	clk := &clock{now: time.Now().UTC().Truncate(time.Microsecond).Add(400 * time.Nanosecond)}
 	svc := auth.NewService(gdb, []byte("integration-secret-at-least-32-bytes!"), clk.Now,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 

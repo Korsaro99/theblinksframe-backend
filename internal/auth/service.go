@@ -62,7 +62,10 @@ func NewService(db *gorm.DB, secret []byte, now func() time.Time, log *slog.Logg
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{db: db, keys: deriveKeys(secret), now: func() time.Time { return now().UTC() }, log: log}
+	// Postgres stores microseconds and rounds anything finer. Working in microseconds too
+	// means a time read back from the database compares exactly with the one written,
+	// which matters at the edges (e.g. a refresh exactly at the end of the grace period).
+	return &Service{db: db, keys: deriveKeys(secret), now: func() time.Time { return now().UTC().Truncate(time.Microsecond) }, log: log}
 }
 
 // ClientInfo describes the device logging in, shown later in a "where you're logged in" list.
