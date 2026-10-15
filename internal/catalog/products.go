@@ -116,11 +116,11 @@ func (s *Store) withThisMonthSales(ctx context.Context, products []models.Produc
 	}
 	out := make([]AdminProduct, len(products))
 	for i, p := range products {
-		s := sales[p.ID]
+		sale := sales[p.ID]
 		out[i] = AdminProduct{
 			Product:                 p,
-			UnitsSoldThisMonth:      s.Units,
-			RevenueThisMonthPesewas: s.RevenuePesewas,
+			UnitsSoldThisMonth:      sale.Units,
+			RevenueThisMonthPesewas: sale.RevenuePesewas,
 		}
 	}
 	return out, nil
