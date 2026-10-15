@@ -17,8 +17,6 @@ import (
 // Task T03: GET /admin/products and GET /admin/products/{productId}.
 // See docs/tasks/T03-admin-products-read.md.
 func TestT03AdminProductsRead(t *testing.T) {
-	pendingTask(t, "T03")
-
 	// Three products across two brands; see each line's comment.
 	type world struct {
 		api                 *testAPI
