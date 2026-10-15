@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"theblinksframe-backend/internal/auth"
+	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/config"
 	"theblinksframe-backend/internal/httpapi"
 	"theblinksframe-backend/internal/platform/db"
@@ -67,6 +68,7 @@ func run() error {
 		Authorizer:         authz,
 		LoginLimiter:       auth.NewLoginLimiter(time.Now),
 		Cookies:            httpapi.CookieOptions{Secure: cfg.CookieSecure, Domain: cfg.CookieDomain},
+		Catalog:            catalog.NewStore(gdb, nil),
 	})
 	if err != nil {
 		return err

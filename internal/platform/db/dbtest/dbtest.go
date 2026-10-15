@@ -6,6 +6,7 @@ package dbtest
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -40,39 +41,64 @@ type Postgres struct {
 // Start runs Postgres in a container, applies every migration and stops it when the test ends.
 func Start(t *testing.T) *Postgres {
 	t.Helper()
+	pg, stop, err := StartMain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	return pg
+}
+
+// StartMain is Start for TestMain, where there is no *testing.T: one database shared by every
+// test in the package. Call stop after m.Run().
+func StartMain() (pg *Postgres, stop func(), err error) {
 	ctx := context.Background()
+	var cleanups []func()
+	stop = func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}
+	defer func() {
+		if err != nil {
+			stop()
+		}
+	}()
 
 	nw, err := network.New(ctx)
 	if err != nil {
-		t.Fatalf("network: %v", err)
+		return nil, nil, fmt.Errorf("network: %w", err)
 	}
-	testcontainers.CleanupNetwork(t, nw)
+	cleanups = append(cleanups, func() { _ = nw.Remove(ctx) })
 
 	ctr, err := postgres.Run(ctx, pgImage,
 		postgres.WithDatabase(pgDB), postgres.WithUsername(pgUser), postgres.WithPassword(pgPass),
 		postgres.BasicWaitStrategies(),
 		network.WithNetwork([]string{pgAlias}, nw),
 	)
-	testcontainers.CleanupContainer(t, ctr)
+	if ctr != nil {
+		cleanups = append(cleanups, func() { _ = testcontainers.TerminateContainer(ctr) })
+	}
 	if err != nil {
-		t.Fatalf("postgres: %v", err)
+		return nil, nil, fmt.Errorf("postgres: %w", err)
 	}
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		t.Fatalf("dsn: %v", err)
+		return nil, nil, fmt.Errorf("dsn: %w", err)
 	}
-	pg := &Postgres{DSN: dsn, network: nw}
-	pg.Liquibase(t, "update")
-	return pg
+	pg = &Postgres{DSN: dsn, network: nw}
+	if err := pg.liquibase(ctx, "update"); err != nil {
+		return nil, nil, err
+	}
+	return pg, stop, nil
 }
 
 // Open connects with the same settings as the API and closes the pool when the test ends.
 func (p *Postgres) Open(t *testing.T) *gorm.DB {
 	t.Helper()
-	gdb, err := db.Open(context.Background(), p.DSN, db.Options{MaxOpenConns: 4, MaxIdleConns: 2},
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	gdb, err := p.OpenMain()
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatal(err)
 	}
 	sqlDB, err := gdb.DB()
 	if err != nil {
@@ -82,13 +108,45 @@ func (p *Postgres) Open(t *testing.T) *gorm.DB {
 	return gdb
 }
 
+// OpenMain is Open for TestMain. The pool is closed when the test binary exits.
+func (p *Postgres) OpenMain() (*gorm.DB, error) {
+	gdb, err := db.Open(context.Background(), p.DSN, db.Options{MaxOpenConns: 4, MaxIdleConns: 2},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		return nil, fmt.Errorf("open: %w", err)
+	}
+	return gdb, nil
+}
+
+// Reset empties every application table (not Liquibase's own) and restarts sequences, so
+// each test starts from a clean, migrated database.
+func Reset(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	var tables []string
+	err := gdb.Raw(`SELECT quote_ident(tablename) FROM pg_tables
+		WHERE schemaname = 'public' AND tablename NOT LIKE 'databasechangelog%'`).Scan(&tables).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tables) == 0 {
+		return
+	}
+	if err := gdb.Exec("TRUNCATE " + strings.Join(tables, ", ") + " RESTART IDENTITY CASCADE").Error; err != nil {
+		t.Fatalf("reset database: %v", err)
+	}
+}
+
 // Liquibase runs one Liquibase command in the same image `make migrate` uses and fails the
 // test if it exits non-zero.
 func (p *Postgres) Liquibase(t *testing.T, args ...string) {
 	t.Helper()
-	ctx := context.Background()
-	dbDir := filepath.Join(repoRoot(t), "db")
+	if err := p.liquibase(context.Background(), args...); err != nil {
+		t.Fatal(err)
+	}
+}
 
+func (p *Postgres) liquibase(ctx context.Context, args ...string) error {
+	dbDir := filepath.Join(repoRoot(), "db")
 	ctr, err := testcontainers.Run(ctx, "",
 		testcontainers.WithDockerfile(testcontainers.FromDockerfile{
 			Context:    dbDir,
@@ -115,28 +173,26 @@ func (p *Postgres) Liquibase(t *testing.T, args ...string) {
 		testcontainers.WithCmd(args...),
 		testcontainers.WithWaitStrategy(wait.ForExit().WithExitTimeout(3*time.Minute)),
 	)
-	testcontainers.CleanupContainer(t, ctr)
-	if err != nil {
-		t.Fatalf("liquibase %s: %v", strings.Join(args, " "), err)
+	if ctr != nil {
+		defer func() { _ = testcontainers.TerminateContainer(ctr) }()
 	}
-
+	if err != nil {
+		return fmt.Errorf("liquibase %s: %w", strings.Join(args, " "), err)
+	}
 	state, err := ctr.State(ctx)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	if state.ExitCode != 0 {
 		logs, _ := ctr.Logs(ctx)
 		out, _ := io.ReadAll(logs)
-		t.Fatalf("liquibase %s exited %d:\n%s", strings.Join(args, " "), state.ExitCode, out)
+		return fmt.Errorf("liquibase %s exited %d:\n%s", strings.Join(args, " "), state.ExitCode, out)
 	}
+	return nil
 }
 
 // repoRoot finds the repository from this file's location, so tests in any package work.
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate dbtest source file")
-	}
+func repoRoot() string {
+	_, file, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(file), "..", "..", "..", "..")
 }

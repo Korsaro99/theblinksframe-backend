@@ -31,6 +31,23 @@ test: ## Run unit tests
 test-integration: ## Run all tests, including those against a real Postgres (needs Docker)
 	go test -race -tags=integration ./...
 
+.PHONY: check
+check: lint gen-check tidy-check test-integration ## Everything CI checks; run before every commit (needs Docker)
+
+.PHONY: task
+task: ## Run one task's acceptance tests, including pending ones: make task TASK=T03
+	@test -n "$(TASK)" || { echo "usage: make task TASK=T01 (see docs/tasks/README.md)"; exit 1; }
+	TASK=$(TASK) go test -race -tags=integration -count=1 ./...
+
+.PHONY: gen-check
+gen-check: ## Fail if internal/httpapi/gen is out of date with api/openapi.yaml
+	go tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml
+	@git diff --exit-code -- internal/httpapi/gen || { echo "Generated code changed: commit it, or undo your edits under internal/httpapi/gen."; exit 1; }
+
+.PHONY: tidy-check
+tidy-check: ## Fail if go.mod/go.sum need `go mod tidy`
+	go mod tidy -diff
+
 .PHONY: lint
 lint: $(LINT) ## Run golangci-lint
 	$(LINT) run

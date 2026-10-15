@@ -228,10 +228,10 @@ func TestAdminRoutesNeedLogin(t *testing.T) {
 		{"staff may not delete a brand", models.RoleStaff, request{method: "DELETE", path: "/api/v1/admin/brands/" + uuid.NewString(), cookies: logged, csrf: csrf}, 403, "FORBIDDEN"},
 		{"staff may not undo an order move", models.RoleStaff, request{method: "POST", path: "/api/v1/admin/orders/" + uuid.NewString() + "/undo", cookies: logged, csrf: csrf}, 403, "FORBIDDEN"},
 		{"staff may read orders", models.RoleStaff, request{method: "GET", path: "/api/v1/admin/orders", cookies: logged}, 501, "NOT_IMPLEMENTED"},
-		{"owner may delete a brand", models.RoleOwner, request{method: "DELETE", path: "/api/v1/admin/brands/" + uuid.NewString(), cookies: logged, csrf: csrf}, 501, "NOT_IMPLEMENTED"},
+		{"owner may undo an order move", models.RoleOwner, request{method: "POST", path: "/api/v1/admin/orders/" + uuid.NewString() + "/undo", cookies: logged, csrf: csrf}, 501, "NOT_IMPLEMENTED"},
 		{"public catalogue needs no login", "", request{method: "GET", path: "/api/v1/catalog/brands"}, 501, "NOT_IMPLEMENTED"},
 		{"order tracking route exists", "", request{method: "POST", path: "/api/v1/orders/track", body: `{"number":1091,"phone":"0241234567"}`}, 501, "NOT_IMPLEMENTED"},
-		{"bad path parameter", models.RoleOwner, request{method: "GET", path: "/api/v1/admin/brands/not-a-uuid", cookies: logged}, 400, "BAD_REQUEST"},
+		{"bad path parameter", models.RoleOwner, request{method: "GET", path: "/api/v1/admin/orders/not-a-uuid", cookies: logged}, 400, "BAD_REQUEST"},
 		{"body too large", "", request{method: "POST", path: "/api/v1/auth/login", body: `{"login":"` + strings.Repeat("x", maxJSONBody) + `"}`}, 413, "TOO_LARGE"},
 	}
 	for _, tt := range tests {

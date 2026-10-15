@@ -10,33 +10,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/httpapi/gen"
-	"theblinksframe-backend/internal/platform/db/dbtest"
 )
 
 // TestAuthEndToEnd drives the real router, auth service and database the way the
 // frontend does: log in, call /auth/me, refresh, log out.
 func TestAuthEndToEnd(t *testing.T) {
-	gdb := dbtest.Start(t).Open(t)
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := auth.NewService(gdb, []byte("integration-secret-at-least-32-bytes!"), nil, log)
+	api := newAPI(t)
+	svc := auth.NewService(testDB, []byte("integration-secret-at-least-32-bytes!"), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if _, err := svc.BootstrapOwner(t.Context(), "Kwame", "+233241234567", "a long owner passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	authz, err := auth.NewAuthorizer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := NewRouter(Deps{
-		Log: log, DB: fakePinger{}, Auth: svc, Authorizer: authz,
-		LoginLimiter: auth.NewLoginLimiter(time.Now), Cookies: CookieOptions{Secure: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	router := api.router
 
 	jar := map[string]string{} // the browser's cookies
 	send := func(method, path, body, csrf string) *httptest.ResponseRecorder {

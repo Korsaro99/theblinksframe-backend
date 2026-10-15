@@ -17,16 +17,6 @@ func notImplemented(c *gin.Context) {
 	WriteProblem(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "This part of the API is not built yet.")
 }
 
-func (unimplemented) AdminListBrands(c *gin.Context) { notImplemented(c) }
-
-func (unimplemented) AdminCreateBrand(c *gin.Context) { notImplemented(c) }
-
-func (unimplemented) AdminDeleteBrand(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
-
-func (unimplemented) AdminGetBrand(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
-
-func (unimplemented) AdminUpdateBrand(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
-
 func (unimplemented) AdminListOrders(c *gin.Context, _ gen.AdminListOrdersParams) { notImplemented(c) }
 
 func (unimplemented) AdminCreateOrder(c *gin.Context, _ gen.AdminCreateOrderParams) {

@@ -19,6 +19,8 @@ linters:
   settings:
     misspell:
       locale: UK # the brief is written in British English: colour, catalogue
+      # US spellings fixed by the API contract and schema (colors, product_colors, POLARIZED).
+      ignore-rules: [color, colors, polarized]
     revive:
       rules:
         - name: exported
