@@ -1,14 +1,17 @@
-// Package httpapi wires the Gin router: middleware, health check and (from M2) the
-// handlers that implement the generated OpenAPI server interface in ./gen.
+// Package httpapi wires the Gin router: middleware, health check, OpenAPI validation and
+// the handlers that implement the generated server interface in ./gen.
 package httpapi
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+
+	"theblinksframe-backend/internal/httpapi/gen"
 )
 
 // Deps are the services the router needs.
@@ -17,18 +20,27 @@ type Deps struct {
 	DB                 Pinger
 	CORSAllowedOrigins []string
 	Production         bool
+	// TrustedProxies are the reverse proxies whose X-Forwarded-For is believed. Without
+	// one, every request behind a proxy would share the proxy's IP in rate limits.
+	TrustedProxies []string
+
+	Auth         AuthService
+	Authorizer   Authorizer
+	LoginLimiter LoginLimiter
+	Cookies      CookieOptions
 }
 
 // NewRouter builds the HTTP handler for the whole API.
-func NewRouter(d Deps) *gin.Engine {
+func NewRouter(d Deps) (*gin.Engine, error) {
 	if d.Production {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
-	// TODO: set trusted proxies once hosting (and its reverse proxy) is decided, so ClientIP
-	// is right for login rate limiting. Until then forwarded headers are ignored.
-	_ = r.SetTrustedProxies(nil)
+	// Empty means forwarded headers are ignored, so a client cannot fake its IP with them.
+	if err := r.SetTrustedProxies(d.TrustedProxies); err != nil {
+		return nil, fmt.Errorf("trusted proxies: %w", err)
+	}
 
 	r.Use(requestID(), accessLog(d.Log), recovery(d.Log))
 	if len(d.CORSAllowedOrigins) > 0 {
@@ -51,6 +63,21 @@ func NewRouter(d Deps) *gin.Engine {
 
 	r.GET("/healthz", healthz(d.DB, d.Log))
 
-	// /api/v1 routes are registered from M2, once the OpenAPI contract is agreed.
-	return r
+	srv := &Server{auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log}
+	spec, err := gen.GetSwagger()
+	if err != nil {
+		return nil, fmt.Errorf("load embedded openapi spec: %w", err)
+	}
+	validator, err := openAPIValidator(spec, srv.authenticate, d.Log)
+	if err != nil {
+		return nil, err
+	}
+	gen.RegisterHandlersWithOptions(r.Group("/api/v1", validator), srv, gen.GinServerOptions{
+		// Parameters were already checked by the validator; this only fires if they disagree.
+		ErrorHandler: func(c *gin.Context, err error, status int) {
+			WriteProblem(c, status, "BAD_REQUEST", "The request is not in the expected format.",
+				FieldProblem{Field: "", Message: err.Error()})
+		},
+	})
+	return r, nil
 }

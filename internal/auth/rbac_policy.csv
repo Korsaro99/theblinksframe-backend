@@ -1,0 +1,24 @@
+# Who may call which admin route. Anything not allowed here is refused (403).
+# Applies only to routes that need a logged-in staff member (accessCookie in api/openapi.yaml).
+#
+# TODO(open): BRIEF §14 Q15. Who runs the admin day to day, and what may staff do?
+# Until the client answers, STAFF handles day-to-day shop work and OWNER does the rest.
+
+# OWNER can do everything STAFF can, and more.
+g, OWNER, STAFF
+
+# --- STAFF ---------------------------------------------------------------
+p, STAFF, /api/v1/auth/*, *
+# Read every admin screen.
+p, STAFF, /api/v1/admin/*, GET
+# Orders: add WhatsApp/shop orders, edit notes and delivery, move orders on, confirm MoMo payments.
+p, STAFF, /api/v1/admin/orders, POST
+p, STAFF, /api/v1/admin/orders/:orderId, PATCH
+p, STAFF, /api/v1/admin/orders/:orderId/transition, POST
+p, STAFF, /api/v1/admin/orders/:orderId/confirm-payment, POST
+# Products: stocktake and show/hide only (ProductPatch). Prices and details need OWNER.
+p, STAFF, /api/v1/admin/products/:productId, PATCH
+
+# --- OWNER ---------------------------------------------------------------
+# Everything else: brands and products (create, edit, delete), undoing order moves, settings.
+p, OWNER, /api/v1/*, *

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: The Blinks API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     REST API for The Blinks storefront and back office. This file is the contract between
     `theblinksframe-backend` and the Angular frontend: change it first, then regenerate both sides.
@@ -372,25 +372,23 @@ paths:
               schema: { $ref: '#/components/schemas/PaymentState' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /orders/{number}/status:
-    get:
+  /orders/track:
+    post:
       tags: [Orders]
-      operationId: getOrderStatus
+      operationId: trackOrder
       summary: Customer order tracking
       description: |
         Needs the order number and the phone number used on the order. A wrong phone returns the same
         404 as an unknown order. Rate-limited.
+
+        This is a POST so the phone number travels in the body: URLs end up in proxy and CDN logs,
+        browser history and `Referer` headers. Nothing is changed.
       security: []
-      parameters:
-        - name: number
-          in: path
-          required: true
-          description: Order number without the "#", e.g. 1091.
-          schema: { type: integer, format: int64, minimum: 1 }
-        - name: phone
-          in: query
-          required: true
-          schema: { type: string, example: '024 123 4567' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TrackOrderRequest' }
       responses:
         '200':
           description: Tracking details.
@@ -398,6 +396,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/OrderTracking' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
   # ---------------------------------------------------------------- Webhooks
@@ -1459,6 +1458,20 @@ components:
         brandName: { type: string }
         colorName: { type: string }
         quantity: { type: integer }
+    TrackOrderRequest:
+      type: object
+      required: [number, phone]
+      properties:
+        number:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Order number without the "#", e.g. 1091.
+          example: 1091
+        phone:
+          type: string
+          description: The phone number used on the order, in local or +233 form.
+          example: 024 123 4567
     OrderTracking:
       type: object
       required: [number, status, fulfilment, items, totalPesewas, createdAt, timeline]

@@ -3,71 +3,28 @@
 package db_test
 
 import (
-	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"log/slog"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/network"
-	"github.com/testcontainers/testcontainers-go/wait"
 
-	"theblinksframe-backend/internal/platform/db"
+	"theblinksframe-backend/internal/platform/db/dbtest"
 )
 
-const (
-	pgImage  = "postgres:18.6-alpine" // keep in step with docker-compose.yml
-	pgAlias  = "postgres"
-	pgDB     = "blinks"
-	pgUser   = "blinks"
-	pgPass   = "blinks"
-	nChanges = 16 // changesets in db/changelog; update when adding migrations
-)
+const nChanges = 16 // changesets in db/changelog; update when adding migrations
 
 // TestMigrations applies every Liquibase changeset to a fresh Postgres, checks that the
 // schema enforces the business rules it is meant to, then rolls everything back and
 // re-applies it to prove the rollbacks work.
 func TestMigrations(t *testing.T) {
-	ctx := context.Background()
-
-	nw, err := network.New(ctx)
-	if err != nil {
-		t.Fatalf("network: %v", err)
-	}
-	testcontainers.CleanupNetwork(t, nw)
-
-	pg, err := postgres.Run(ctx, pgImage,
-		postgres.WithDatabase(pgDB), postgres.WithUsername(pgUser), postgres.WithPassword(pgPass),
-		postgres.BasicWaitStrategies(),
-		network.WithNetwork([]string{pgAlias}, nw),
-	)
-	testcontainers.CleanupContainer(t, pg)
-	if err != nil {
-		t.Fatalf("postgres: %v", err)
-	}
-
-	runLiquibase(t, nw, "update")
-
-	dsn, err := pg.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatalf("dsn: %v", err)
-	}
-	gdb, err := db.Open(ctx, dsn, db.Options{MaxOpenConns: 2, MaxIdleConns: 1}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
+	pg := dbtest.Start(t)
+	gdb := pg.Open(t)
 	sqlDB, err := gdb.DB()
 	if err != nil {
 		t.Fatalf("sql db: %v", err)
 	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
 
 	var applied int
 	if err := sqlDB.QueryRow("SELECT count(*) FROM databasechangelog").Scan(&applied); err != nil {
@@ -87,8 +44,8 @@ func TestMigrations(t *testing.T) {
 
 	t.Run("rollback and reapply", func(t *testing.T) {
 		_ = sqlDB.Close() // release connections so DROP TABLE isn't blocked
-		runLiquibase(t, nw, "rollback-count", "--count=999")
-		runLiquibase(t, nw, "update")
+		pg.Liquibase(t, "rollback-count", "--count=999")
+		pg.Liquibase(t, "update")
 	})
 }
 
@@ -219,57 +176,5 @@ func testUpdatedAt(t *testing.T, sqlDB *sql.DB) {
 	}
 	if !after.After(before) {
 		t.Errorf("updated_at not bumped: before %v, after %v", before, after)
-	}
-}
-
-// runLiquibase runs one Liquibase command in the same image `make migrate` uses and fails the
-// test, with Liquibase's output, if it exits non-zero.
-func runLiquibase(t *testing.T, nw *testcontainers.DockerNetwork, args ...string) {
-	t.Helper()
-	ctx := context.Background()
-	dbDir, err := filepath.Abs("../../../db")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctr, err := testcontainers.Run(ctx, "",
-		testcontainers.WithDockerfile(testcontainers.FromDockerfile{
-			Context:    dbDir,
-			Dockerfile: "liquibase.Dockerfile",
-			Repo:       "blinks-liquibase",
-			Tag:        "test",
-			KeepImage:  true,
-		}),
-		network.WithNetwork(nil, nw),
-		testcontainers.WithEnv(map[string]string{
-			"LIQUIBASE_COMMAND_URL":            "jdbc:postgresql://" + pgAlias + ":5432/" + pgDB,
-			"LIQUIBASE_COMMAND_USERNAME":       pgUser,
-			"LIQUIBASE_COMMAND_PASSWORD":       pgPass,
-			"LIQUIBASE_COMMAND_CHANGELOG_FILE": "changelog-master.yaml",
-			"LIQUIBASE_SEARCH_PATH":            "/liquibase/changelog",
-			"LIQUIBASE_SHOW_BANNER":            "false",
-			"LIQUIBASE_ANALYTICS_ENABLED":      "false",
-		}),
-		testcontainers.WithFiles(testcontainers.ContainerFile{
-			HostFilePath:      filepath.Join(dbDir, "changelog"),
-			ContainerFilePath: "/liquibase/changelog",
-			FileMode:          0o755,
-		}),
-		testcontainers.WithCmd(args...),
-		testcontainers.WithWaitStrategy(wait.ForExit().WithExitTimeout(3*time.Minute)),
-	)
-	testcontainers.CleanupContainer(t, ctr)
-	if err != nil {
-		t.Fatalf("liquibase %s: %v", strings.Join(args, " "), err)
-	}
-
-	state, err := ctr.State(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.ExitCode != 0 {
-		logs, _ := ctr.Logs(ctx)
-		out, _ := io.ReadAll(logs)
-		t.Fatalf("liquibase %s exited %d:\n%s", strings.Join(args, " "), state.ExitCode, out)
 	}
 }

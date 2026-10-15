@@ -501,7 +501,7 @@ GET  /catalog/menu              counts per gender / brand / style / band (feeds 
 POST /cart/quote                items + zone → subtotal, delivery fee, total
 POST /orders                    create website order (AWAITING_PAYMENT)
 POST /orders/:id/pay            { network, momoNumber } → provider.initiate
-GET  /orders/:number/status?phone=
+POST /orders/track               { number, phone } → tracking (v0.2.0; was GET /orders/:number/status?phone=)
 POST /webhooks/payments/:provider
 ```
 
@@ -615,3 +615,7 @@ Still open:
 | 2026-10-04 | API contract v0 agreed and tagged `api-v0.1.0`. |
 | 2026-10-04 | Frontend stack: Angular 22 (zoneless, signals), SSR for the storefront with `/about` and `/find-us` prerendered, client-rendered lazy `/admin`. PrimeNG with a custom theme built from §3.1, plus Tailwind; self-hosted fonts; `ng-openapi-gen` client generated from the tagged spec; Vitest and Playwright. Working name `theblinksframe-frontend`. |
 | 2026-10-04 | Cloudflare free plan in front of the VM as the CDN; SSR stays on the VM (§10). Price format shows decimals only when not whole; the WhatsApp message uses the same format and drops the colour when there is none (§7.6, §7.7). |
+| 2026-10-04 | The frontend's UI library, PrimeNG, is now under the commercial PrimeUI License. We use its free Community License (for individuals and businesses under $1M revenue, fewer than 5 developers and fewer than 10 employees). It needs a licence key renewed every year; if the shop outgrows it, a paid licence is needed. |
+| 2026-10-14 | API contract v0.2.0: order tracking moves from `GET /orders/{number}/status?phone=` to `POST /orders/track` with `{ number, phone }` in the body. The old path clashed with `/orders/{orderId}` in the Gin router, and the move keeps customers' phone numbers out of URLs (proxy and CDN logs, browser history). The frontend must regenerate its client. |
+| 2026-10-14 | M2 is built in slices: staff auth first, then catalogue CRUD, then media, then the public catalogue and seed. Media storage is still undecided (Cloudinary or Oracle Object Storage). |
+| 2026-10-14 | The first OWNER account is created on startup from `OWNER_BOOTSTRAP_NAME`, `_PHONE` and `_PASSWORD` when no owner exists; it never changes an existing account. Staff permissions until §14 Q15 is answered: STAFF reads everything and handles orders, stocktakes and product visibility; only OWNER creates, edits or deletes brands and products and undoes order moves. |

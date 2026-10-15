@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/config"
 	"theblinksframe-backend/internal/httpapi"
 	"theblinksframe-backend/internal/platform/db"
@@ -48,14 +49,32 @@ func run() error {
 	}
 	defer sqlDB.Close()
 
+	authSvc := auth.NewService(gdb, cfg.JWTSecret, nil, log)
+	if err := bootstrapOwner(ctx, cfg, authSvc, log); err != nil {
+		return err
+	}
+	authz, err := auth.NewAuthorizer()
+	if err != nil {
+		return err
+	}
+	handler, err := httpapi.NewRouter(httpapi.Deps{
+		Log:                log,
+		DB:                 sqlDB,
+		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
+		Production:         cfg.IsProduction(),
+		TrustedProxies:     cfg.TrustedProxies,
+		Auth:               authSvc,
+		Authorizer:         authz,
+		LoginLimiter:       auth.NewLoginLimiter(time.Now),
+		Cookies:            httpapi.CookieOptions{Secure: cfg.CookieSecure, Domain: cfg.CookieDomain},
+	})
+	if err != nil {
+		return err
+	}
+
 	srv := &http.Server{
-		Addr: cfg.HTTPAddr,
-		Handler: httpapi.NewRouter(httpapi.Deps{
-			Log:                log,
-			DB:                 sqlDB,
-			CORSAllowedOrigins: cfg.CORSAllowedOrigins,
-			Production:         cfg.IsProduction(),
-		}),
+		Addr:              cfg.HTTPAddr,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second, // media uploads (M2) may need more; revisit then
 		WriteTimeout:      30 * time.Second,
@@ -80,6 +99,24 @@ func run() error {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
+	}
+	return nil
+}
+
+// bootstrapOwner creates the first OWNER account from OWNER_BOOTSTRAP_* if the database
+// has none. It never touches an existing account.
+func bootstrapOwner(ctx context.Context, cfg config.Config, svc *auth.Service, log *slog.Logger) error {
+	if cfg.Owner == nil {
+		return nil
+	}
+	created, err := svc.BootstrapOwner(ctx, cfg.Owner.Name, cfg.Owner.Phone, cfg.Owner.Password)
+	if err != nil {
+		return fmt.Errorf("bootstrap owner: %w", err)
+	}
+	if created {
+		log.Info("created the first OWNER account from OWNER_BOOTSTRAP_*; remove OWNER_BOOTSTRAP_PASSWORD from the environment now")
+	} else {
+		log.Warn("an OWNER account already exists, so OWNER_BOOTSTRAP_* was ignored; remove OWNER_BOOTSTRAP_PASSWORD from the environment")
 	}
 	return nil
 }

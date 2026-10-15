@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"theblinksframe-backend/internal/phone"
 )
 
 // Env is the deployment environment.
@@ -39,7 +42,35 @@ type Config struct {
 
 	LogLevel  slog.Level
 	LogFormat string // "json" or "text"
+
+	// TrustedProxies are the reverse proxies (IPs or CIDRs) whose X-Forwarded-For header is
+	// believed. Empty means forwarded headers are ignored and the TCP peer is the client.
+	TrustedProxies []string
+
+	// JWTSecret signs access tokens and CSRF tokens. At least 32 bytes.
+	JWTSecret []byte
+	// CookieSecure sets the Secure flag on auth cookies. Only development may turn it off.
+	CookieSecure bool
+	// CookieDomain is the auth cookies' Domain, e.g. "theblinks.com" so that the site and
+	// api.theblinks.com share them. Empty means host-only cookies (fine for localhost).
+	CookieDomain string
+
+	// Owner, when set, creates the first OWNER account on startup if there is none yet.
+	Owner *OwnerBootstrap
 }
+
+// OwnerBootstrap is the first OWNER account, created once from env on an empty database.
+type OwnerBootstrap struct {
+	Name     string
+	Phone    string // E.164
+	Password string
+}
+
+// exampleJWTSecret is the value in .env.example. Production refuses to start with it.
+const exampleJWTSecret = "dev-only-not-a-secret-replace-me-with-openssl-rand" //nolint:gosec // public on purpose; refused in production
+
+// minOwnerPasswordLen is the shortest bootstrap password accepted. Long beats complex.
+const minOwnerPasswordLen = 12
 
 // IsProduction reports whether the API is running in production.
 func (c Config) IsProduction() bool { return c.Env == EnvProduction }
@@ -130,5 +161,67 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 		errs = append(errs, fmt.Errorf("LOG_FORMAT must be json or text, got %q", cfg.LogFormat))
 	}
 
+	for _, p := range strings.Split(get("TRUSTED_PROXIES", ""), ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if net.ParseIP(p) == nil {
+			if _, _, err := net.ParseCIDR(p); err != nil {
+				errs = append(errs, fmt.Errorf("TRUSTED_PROXIES: %q is not an IP address or CIDR", p))
+				continue
+			}
+		}
+		cfg.TrustedProxies = append(cfg.TrustedProxies, p)
+	}
+
+	errs = append(errs, loadAuth(&cfg, get)...)
+
 	return cfg, errors.Join(errs...)
+}
+
+// loadAuth reads the admin authentication settings.
+func loadAuth(cfg *Config, get func(key, def string) string) []error {
+	var errs []error
+
+	secret := get("JWT_SECRET", "")
+	switch {
+	case secret == "":
+		errs = append(errs, errors.New("JWT_SECRET is required; generate one with: openssl rand -base64 48"))
+	case len(secret) < 32:
+		errs = append(errs, errors.New("JWT_SECRET must be at least 32 bytes; generate one with: openssl rand -base64 48"))
+	case cfg.IsProduction() && secret == exampleJWTSecret:
+		errs = append(errs, errors.New("JWT_SECRET is still the example value from .env.example"))
+	}
+	cfg.JWTSecret = []byte(secret)
+
+	switch v := get("COOKIE_SECURE", "true"); v {
+	case "true":
+		cfg.CookieSecure = true
+	case "false":
+		if cfg.Env != EnvDevelopment {
+			errs = append(errs, errors.New("COOKIE_SECURE=false is only allowed when APP_ENV=development"))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("COOKIE_SECURE must be true or false, got %q", v))
+	}
+	cfg.CookieDomain = strings.TrimPrefix(get("COOKIE_DOMAIN", ""), ".")
+
+	name, rawPhone, password := get("OWNER_BOOTSTRAP_NAME", ""), get("OWNER_BOOTSTRAP_PHONE", ""), get("OWNER_BOOTSTRAP_PASSWORD", "")
+	if name == "" && rawPhone == "" && password == "" {
+		return errs
+	}
+	if name == "" || rawPhone == "" || password == "" {
+		return append(errs, errors.New("OWNER_BOOTSTRAP_NAME, OWNER_BOOTSTRAP_PHONE and OWNER_BOOTSTRAP_PASSWORD must be set together"))
+	}
+	e164, err := phone.Normalise(rawPhone)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("OWNER_BOOTSTRAP_PHONE: %w", err))
+	}
+	// bcrypt only looks at the first 72 bytes, so longer passwords are refused rather than truncated.
+	if len(password) < minOwnerPasswordLen || len(password) > 72 {
+		errs = append(errs, fmt.Errorf("OWNER_BOOTSTRAP_PASSWORD must be %d to 72 bytes long", minOwnerPasswordLen))
+	}
+	cfg.Owner = &OwnerBootstrap{Name: name, Phone: e164, Password: password}
+	return errs
 }

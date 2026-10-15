@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"theblinksframe-backend/internal/auth"
 )
 
 type fakePinger struct{ err error }
@@ -18,12 +21,31 @@ type fakePinger struct{ err error }
 func (f fakePinger) PingContext(context.Context) error { return f.err }
 
 func newTestRouter(db Pinger) *gin.Engine {
+	return newTestRouterWith(nil, db, &fakeAuth{})
+}
+
+func newTestRouterWith(t *testing.T, db Pinger, fa *fakeAuth) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	return NewRouter(Deps{
+	authz, err := auth.NewAuthorizer()
+	if err != nil {
+		panic(err)
+	}
+	r, err := NewRouter(Deps{
 		Log:                slog.New(slog.NewTextHandler(io.Discard, nil)),
 		DB:                 db,
 		CORSAllowedOrigins: []string{"http://localhost:4200"},
+		Auth:               fa,
+		Authorizer:         authz,
+		LoginLimiter:       auth.NewLoginLimiter(time.Now),
+		Cookies:            CookieOptions{Secure: true},
 	})
+	if err != nil {
+		if t != nil {
+			t.Fatal(err)
+		}
+		panic(err)
+	}
+	return r
 }
 
 func TestRoutes(t *testing.T) {

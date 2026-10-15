@@ -1,0 +1,88 @@
+package httpapi
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
+	"theblinksframe-backend/internal/httpapi/gen"
+)
+
+// unimplemented answers 501 for operations in api/openapi.yaml that later milestones build.
+// Server embeds it; when an operation is implemented on Server, delete its stub here.
+type unimplemented struct{}
+
+func notImplemented(c *gin.Context) {
+	WriteProblem(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "This part of the API is not built yet.")
+}
+
+func (unimplemented) AdminListBrands(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) AdminCreateBrand(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) AdminDeleteBrand(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
+
+func (unimplemented) AdminGetBrand(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
+
+func (unimplemented) AdminUpdateBrand(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
+
+func (unimplemented) AdminListOrders(c *gin.Context, _ gen.AdminListOrdersParams) { notImplemented(c) }
+
+func (unimplemented) AdminCreateOrder(c *gin.Context, _ gen.AdminCreateOrderParams) {
+	notImplemented(c)
+}
+
+func (unimplemented) AdminGetOrderPipeline(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) AdminGetOrder(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
+
+func (unimplemented) AdminPatchOrder(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
+
+func (unimplemented) AdminConfirmPayment(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
+
+func (unimplemented) AdminTransitionOrder(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
+
+func (unimplemented) AdminUndoOrderTransition(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
+
+func (unimplemented) AdminListProducts(c *gin.Context, _ gen.AdminListProductsParams) {
+	notImplemented(c)
+}
+
+func (unimplemented) AdminCreateProduct(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) AdminDeleteProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
+
+func (unimplemented) AdminGetProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
+
+func (unimplemented) AdminPatchProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
+
+func (unimplemented) AdminUpdateProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
+
+func (unimplemented) AdminListRiders(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) QuoteCart(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) ListBrands(c *gin.Context, _ gen.ListBrandsParams) { notImplemented(c) }
+
+func (unimplemented) GetBrand(c *gin.Context, _ gen.Slug) { notImplemented(c) }
+
+func (unimplemented) GetMenu(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) ListProducts(c *gin.Context, _ gen.ListProductsParams) { notImplemented(c) }
+
+func (unimplemented) GetProduct(c *gin.Context, _ gen.Slug) { notImplemented(c) }
+
+func (unimplemented) ListDeliveryZones(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) CreateOrder(c *gin.Context, _ gen.CreateOrderParams) { notImplemented(c) }
+
+func (unimplemented) TrackOrder(c *gin.Context) { notImplemented(c) }
+
+func (unimplemented) PayOrder(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
+
+func (unimplemented) GetOrderPayment(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
+
+func (unimplemented) ReceivePaymentWebhook(c *gin.Context, _ gen.ReceivePaymentWebhookParamsProvider) {
+	notImplemented(c)
+}
