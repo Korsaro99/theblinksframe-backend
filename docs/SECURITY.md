@@ -75,7 +75,8 @@ Status: **Done** (in the code and tested), **Planned** (milestone noted), **Open
 - [ ] `make seed` refuses to run (`APP_ENV=production`).
 - [ ] `TRUSTED_PROXIES` set to the reverse proxy so rate limits see real client IPs. Behind Cloudflare, the proxy must take the client IP from Cloudflare's header only for Cloudflare's IP ranges.
 - [ ] `JWT_SECRET` generated with `openssl rand -base64 48`, set only on the server. Changing it ends every access token; refresh tokens keep working.
-- [ ] `COOKIE_DOMAIN` set to the shared parent domain; `COOKIE_SECURE=true`.
+- [ ] `COOKIE_DOMAIN=theblinksframes.com` (the shared parent domain); `COOKIE_SECURE=true`.
+- [ ] `CORS_ALLOWED_ORIGINS=https://theblinksframes.com` only: no `www` (Cloudflare redirects it), no `localhost`.
 - [ ] First start with `OWNER_BOOTSTRAP_*`, then **remove `OWNER_BOOTSTRAP_PASSWORD`** from the server environment (the API logs a warning while it is still set).
 - [ ] Owner's account uses a strong, unique password; know how to revoke all sessions: `UPDATE staff_users SET token_version = token_version + 1 WHERE id = …` (also revoke rows in `auth_sessions` to stop refreshes).
 

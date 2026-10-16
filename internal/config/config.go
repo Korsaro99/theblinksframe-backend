@@ -51,8 +51,8 @@ type Config struct {
 	JWTSecret []byte
 	// CookieSecure sets the Secure flag on auth cookies. Only development may turn it off.
 	CookieSecure bool
-	// CookieDomain is the auth cookies' Domain, e.g. "theblinks.com" so that the site and
-	// api.theblinks.com share them. Empty means host-only cookies (fine for localhost).
+	// CookieDomain is the auth cookies' Domain, e.g. "theblinksframes.com" so that the site and
+	// api.theblinksframes.com share them. Empty means host-only cookies (fine for localhost).
 	CookieDomain string
 
 	// Owner, when set, creates the first OWNER account on startup if there is none yet.
@@ -140,7 +140,7 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 			continue
 		}
 		if u, err := url.Parse(o); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" {
-			errs = append(errs, fmt.Errorf("CORS_ALLOWED_ORIGINS: %q is not an origin like https://theblinks.com", o))
+			errs = append(errs, fmt.Errorf("CORS_ALLOWED_ORIGINS: %q is not an origin like https://theblinksframes.com", o))
 			continue
 		}
 		cfg.CORSAllowedOrigins = append(cfg.CORSAllowedOrigins, o)

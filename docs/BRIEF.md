@@ -449,6 +449,9 @@ Any state before DELIVERED ──► CANCELLED
   - PostgreSQL.
   - Product images and videos on Cloudinary or S3-compatible storage, resized on upload.
   - Site on the main domain and the API on an `api.` subdomain of the same domain, so the admin session cookie works.
+- **Domain** (DECIDED 2026-10-16): `theblinksframes.com`, registered with Cloudflare Registrar, so its DNS is already on Cloudflare.
+  - Site: `https://theblinksframes.com`. `www.theblinksframes.com` redirects to it.
+  - API: `https://api.theblinksframes.com`.
 - **Hosting:** OPEN, depending on budget. Angular SSR needs a small Node server; the Go API and Postgres go on a managed host or VPS.
 - **CDN** (DECIDED 2026-10-04): Cloudflare (free plan) in front of the VM, with proxied DNS. It handles TLS and caches the hashed static files at the edge. Storefront HTML gets a short cache; `/admin` and the API are never cached. The Angular SSR server runs on the VM, not on Cloudflare Workers.
 - **Analytics:** GA4 and Meta Pixel (OPEN).
@@ -550,13 +553,14 @@ Already answered:
 - Brand name and location.
 - Categorisation: gender then brand, or directly by brand.
 - He likes the table view.
+- Domain: `theblinksframes.com` (2026-10-16, §10).
 
 Still open:
 
 1. Budget and deadline. Websites or brands he likes.
 2. His **real brand list**, and which genders each brand covers. What "frames and more" includes: prescription frames, cases, chains or other accessories?
 3. Logo and flyer files, the exact name spelling ("The Blinks" or "The Blinks Frames"), and his social handles.
-4. Domain (theblinks.com, theblinksgh.com or theblinks.com.gh) and who pays for hosting.
+4. Who pays for hosting. (The domain is answered: `theblinksframes.com`.)
 5. Business registration and a merchant account for the payment provider's KYC.
 6. Payment methods: AT Money, cards, cash on delivery? Who pays the fees? How are refunds handled?
 7. Delivery: zones, fees, who delivers, regions served, a free-delivery threshold, and how the "Buy 2" deal works.
@@ -620,3 +624,4 @@ Still open:
 | 2026-10-14 | M2 is built in slices: staff auth first, then catalogue CRUD, then media, then the public catalogue and seed. Media storage is still undecided (Cloudinary or Oracle Object Storage). |
 | 2026-10-14 | The first OWNER account is created on startup from `OWNER_BOOTSTRAP_NAME`, `_PHONE` and `_PASSWORD` when no owner exists; it never changes an existing account. Staff permissions until §14 Q15 is answered: STAFF reads everything and handles orders, stocktakes and product visibility; only OWNER creates, edits or deletes brands and products and undoes order moves. |
 | 2026-10-15 | Work is split between a strong model (design, security, money, auth, migrations, spec) and open models (task cards in each repo's `docs/tasks/`, each with tests written in advance and checked against a throwaway version where noted). Agent instructions live in `AGENTS.md` in both repos, which `CLAUDE.md` imports. Backend: admin brand CRUD is the reference example. Frontend: the `/brands` page is the storefront reference, plus `npm run check` and a CI workflow. Sample data in both repos is the design canvas's: 9 products, 5 brands, 106 pairs and GH₵12,600 sold in September. |
+| 2026-10-16 | Domain: `theblinksframes.com`, bought on Cloudflare Registrar. The site is on the bare domain (`www` redirects to it) and the API on `api.theblinksframes.com` (§10). Who pays for hosting is still open (§14 Q4). |
