@@ -62,21 +62,26 @@ Tips for running open models:
 
 ## Index
 
-### Ready for an open model
+### Done
+
+| Card | What | Depends on | Size | Status |
+|---|---|---|---|---|
+| [T03](T03-admin-products-read.md) | Admin product table and product detail | none | M | done |
+| [T04](T04-admin-products-write.md) | Admin create and edit product | T03 | M | done |
+| [T05](T05-admin-products-patch-delete.md) | Admin quick edit and delete product | T03 | S | done |
+| [T06](T06-storefront-list.md) | Storefront product listing (filters, sorts) | none | M | done |
+| [T07](T07-storefront-detail.md) | Storefront product page | T06 | S | done |
+| [T08](T08-menu.md) | Menu counts | none | S | done |
+
+### Ready for an open model (not done)
 
 | Card | What | Depends on | Size | Status |
 |---|---|---|---|---|
 | [T01](T01-public-brands.md) | Storefront brands list and brand page | none | S | ready |
 | [T02](T02-zones-and-riders.md) | Delivery zones list and admin riders list | none | S | ready |
-| [T03](T03-admin-products-read.md) | Admin product table and product detail | none | M | ready |
-| [T04](T04-admin-products-write.md) | Admin create and edit product | T03 | M | ready |
-| [T05](T05-admin-products-patch-delete.md) | Admin quick edit and delete product | T03 | S | ready |
-| [T06](T06-storefront-list.md) | Storefront product listing (filters, sorts) | none | M | ready |
-| [T07](T07-storefront-detail.md) | Storefront product page | T06 | S | ready |
-| [T08](T08-menu.md) | Menu counts | none | S | ready |
 | [T09](T09-seed.md) | Development sample data (`make seed`) | none | M | ready |
 
-T01, T02, T03, T06, T08 and T09 don't depend on each other and can run in parallel on separate branches. Expect small merge conflicts in `internal/httpapi/unimplemented.go` (each task deletes different lines).
+T01, T02 and T09 don't depend on each other and can run in parallel on separate branches. Expect small merge conflicts in `internal/httpapi/unimplemented.go` (each task deletes different lines).
 
 ### Later open-model cards (blocked until a strong-model step lands)
 
