@@ -35,13 +35,9 @@ func (unimplemented) AdminTransitionOrder(c *gin.Context, _ gen.OrderId) { notIm
 
 func (unimplemented) AdminUndoOrderTransition(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
 
-func (unimplemented) AdminCreateProduct(c *gin.Context) { notImplemented(c) }
-
 func (unimplemented) AdminDeleteProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
 
 func (unimplemented) AdminPatchProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
-
-func (unimplemented) AdminUpdateProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
 
 func (unimplemented) AdminListRiders(c *gin.Context) { notImplemented(c) }
 
