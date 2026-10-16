@@ -13,7 +13,6 @@ import (
 
 // Task T08: GET /catalog/menu. See docs/tasks/T08-menu.md.
 func TestT08Menu(t *testing.T) {
-	pendingTask(t, "T08")
 	api := newAPI(t)
 	volta, zuri, blinks := api.brand("Volta"), api.brand("Zuri"), api.brand("The Blinks")
 	api.product(volta, func(p *models.Product) { p.PricePesewas = 120_00 })                                       // men, aviator, under 150
