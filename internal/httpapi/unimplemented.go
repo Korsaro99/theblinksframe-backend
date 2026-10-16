@@ -36,14 +36,6 @@ func (unimplemented) AdminUndoOrderTransition(c *gin.Context, _ gen.OrderId) { n
 
 func (unimplemented) QuoteCart(c *gin.Context) { notImplemented(c) }
 
-<<<<<<< HEAD
-func (unimplemented) ListBrands(c *gin.Context, _ gen.ListBrandsParams) { notImplemented(c) }
-
-func (unimplemented) GetBrand(c *gin.Context, _ gen.Slug) { notImplemented(c) }
-=======
-func (unimplemented) ListDeliveryZones(c *gin.Context) { notImplemented(c) }
->>>>>>> origin/main
-
 func (unimplemented) CreateOrder(c *gin.Context, _ gen.CreateOrderParams) { notImplemented(c) }
 
 func (unimplemented) TrackOrder(c *gin.Context) { notImplemented(c) }
