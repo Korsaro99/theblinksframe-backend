@@ -29,7 +29,7 @@ func (s *Server) ListBrands(c *gin.Context, params gen.ListBrandsParams) {
 
 // GetBrand implements GET /catalog/brands/{slug}.
 func (s *Server) GetBrand(c *gin.Context, slug gen.Slug) {
-	b, err := s.catalog.GetStoreBrand(c.Request.Context(), string(slug))
+	b, err := s.catalog.GetStoreBrand(c.Request.Context(), slug)
 	if err != nil {
 		s.writeCatalogError(c, err)
 		return
