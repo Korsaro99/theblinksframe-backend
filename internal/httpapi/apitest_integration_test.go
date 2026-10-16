@@ -20,6 +20,7 @@ import (
 
 	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/catalog"
+	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/models"
 	"theblinksframe-backend/internal/platform/db/dbtest"
 	"theblinksframe-backend/internal/tasktest"
@@ -73,6 +74,7 @@ func newAPI(t *testing.T) *testAPI {
 		LoginLimiter: auth.NewLoginLimiter(time.Now),
 		Cookies:      CookieOptions{Secure: true},
 		Catalog:      catalog.NewStore(testDB, func() time.Time { return testNow }),
+		Delivery:     delivery.NewStore(testDB),
 	})
 	if err != nil {
 		t.Fatal(err)

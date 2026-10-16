@@ -13,6 +13,7 @@ import (
 
 	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/catalog"
+	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi/gen"
 	"theblinksframe-backend/internal/models"
 )
@@ -42,12 +43,13 @@ type LoginLimiter interface {
 // Server implements the operations of api/openapi.yaml (gen.ServerInterface).
 type Server struct {
 	unimplemented
-	catalog *catalog.Store
-	auth    AuthService
-	authz   Authorizer
-	limiter LoginLimiter
-	cookies CookieOptions
-	log     *slog.Logger
+	catalog  *catalog.Store
+	delivery *delivery.Store
+	auth     AuthService
+	authz    Authorizer
+	limiter  LoginLimiter
+	cookies  CookieOptions
+	log      *slog.Logger
 }
 
 var _ gen.ServerInterface = (*Server)(nil)

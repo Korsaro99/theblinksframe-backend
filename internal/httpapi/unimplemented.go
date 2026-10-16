@@ -34,11 +34,7 @@ func (unimplemented) AdminTransitionOrder(c *gin.Context, _ gen.OrderId) { notIm
 
 func (unimplemented) AdminUndoOrderTransition(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
 
-func (unimplemented) AdminListRiders(c *gin.Context) { notImplemented(c) }
-
 func (unimplemented) QuoteCart(c *gin.Context) { notImplemented(c) }
-
-func (unimplemented) ListDeliveryZones(c *gin.Context) { notImplemented(c) }
 
 func (unimplemented) CreateOrder(c *gin.Context, _ gen.CreateOrderParams) { notImplemented(c) }
 

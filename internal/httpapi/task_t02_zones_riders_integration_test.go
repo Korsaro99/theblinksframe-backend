@@ -12,7 +12,6 @@ import (
 
 // Task T02: GET /delivery/zones and GET /admin/riders. See docs/tasks/T02-zones-and-riders.md.
 func TestT02DeliveryZones(t *testing.T) {
-	pendingTask(t, "T02")
 	api := newAPI(t)
 	api.zone("Kumasi (same day)", 2000)
 	api.zone("Accra (bus parcel)", 3500, func(z *models.DeliveryZone) {
@@ -48,7 +47,6 @@ func TestT02DeliveryZones(t *testing.T) {
 }
 
 func TestT02AdminRiders(t *testing.T) {
-	pendingTask(t, "T02")
 	api := newAPI(t)
 	api.rider("Yaw", "+233240000001")
 	api.rider("Abena", "+233240000002", func(r *models.Rider) { r.Kind = "BOLT_YANGO" })
