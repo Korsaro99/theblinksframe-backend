@@ -95,4 +95,4 @@ psql: ## Open a psql shell on the local database
 
 .PHONY: seed
 seed: ## Load development sample data (M2)
-	@echo "make seed arrives in M2 with the catalogue." && exit 1
+	go run ./cmd/seed

@@ -12,8 +12,6 @@ import (
 
 // Task T07: GET /catalog/products/{slug} (product page). See docs/tasks/T07-storefront-detail.md.
 func TestT07StorefrontDetail(t *testing.T) {
-	pendingTask(t, "T07")
-
 	t.Run("product page with gallery, cover first", func(t *testing.T) {
 		api := newAPI(t)
 		p := api.product(api.brand("Volta"), func(p *models.Product) { p.Description = "Gold frame."; p.Stock = 2 })
