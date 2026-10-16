@@ -14,7 +14,6 @@ import (
 
 // Task T09: development sample data. See docs/tasks/T09-seed.md.
 func TestT09Seed(t *testing.T) {
-	tasktest.Pending(t, "T09")
 	gdb := dbtest.Start(t).Open(t)
 	ctx := context.Background()
 
