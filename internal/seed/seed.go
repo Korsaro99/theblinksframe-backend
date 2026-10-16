@@ -375,9 +375,10 @@ func insertOneOrder(tx *gorm.DB, products map[string]models.Product, zones map[s
 
 	if o.paidAt != nil {
 		provider, network := "MANUAL", "CASH"
-		if o.source == "WEBSITE" {
+		switch o.source {
+		case "WEBSITE":
 			provider, network = "FAKE", "MTN"
-		} else if o.source == "WHATSAPP" {
+		case "WHATSAPP":
 			network = "MTN"
 		}
 		ref := fmt.Sprintf("seed-%d", o.n)
