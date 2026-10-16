@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"theblinksframe-backend/internal/catalog"
+	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi/gen"
 )
 
@@ -30,7 +31,8 @@ type Deps struct {
 	LoginLimiter LoginLimiter
 	Cookies      CookieOptions
 
-	Catalog *catalog.Store
+	Catalog  *catalog.Store
+	Delivery *delivery.Store
 }
 
 // NewRouter builds the HTTP handler for the whole API.
@@ -66,7 +68,7 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 
 	r.GET("/healthz", healthz(d.DB, d.Log))
 
-	srv := &Server{catalog: d.Catalog, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log}
+	srv := &Server{catalog: d.Catalog, delivery: d.Delivery, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log}
 	spec, err := gen.GetSwagger()
 	if err != nil {
 		return nil, fmt.Errorf("load embedded openapi spec: %w", err)
