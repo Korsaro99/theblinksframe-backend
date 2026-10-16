@@ -10,6 +10,55 @@ import (
 	"theblinksframe-backend/internal/models"
 )
 
+// ListProducts implements GET /catalog/products.
+func (s *Server) ListProducts(c *gin.Context, params gen.ListProductsParams) {
+	f := catalog.StorefrontFilter{Page: 1, PageSize: 24}
+	if params.Gender != nil {
+		f.Gender = string(*params.Gender)
+	}
+	if params.Category != nil {
+		f.Category = string(*params.Category)
+	}
+	if params.Brand != nil {
+		f.BrandSlugs = *params.Brand
+	}
+	if params.Style != nil {
+		f.Styles = make([]string, len(*params.Style))
+		for i, style := range *params.Style {
+			f.Styles[i] = string(style)
+		}
+	}
+	if params.Band != nil {
+		f.Band = string(*params.Band)
+	}
+	if params.Polarized != nil {
+		f.Polarized = *params.Polarized
+	}
+	if params.Label != nil {
+		f.Label = string(*params.Label)
+	}
+	if params.Sort != nil {
+		f.Sort = string(*params.Sort)
+	}
+	if params.Page != nil {
+		f.Page = *params.Page
+	}
+	if params.PageSize != nil {
+		f.PageSize = *params.PageSize
+	}
+
+	products, total, err := s.catalog.ListStoreProducts(c.Request.Context(), f)
+	if err != nil {
+		s.writeCatalogError(c, err)
+		return
+	}
+	items := make([]gen.ProductSummary, len(products))
+	for i, p := range products {
+		items[i] = toGenProductSummary(p)
+	}
+	c.JSON(http.StatusOK, gen.ProductSummaryList{Items: items, Total: int(total)})
+}
+
 // GetProduct implements GET /catalog/products/{slug}.
 func (s *Server) GetProduct(c *gin.Context, slug gen.Slug) {
 	p, err := s.catalog.GetStoreProduct(c.Request.Context(), slug)
@@ -22,22 +71,22 @@ func (s *Server) GetProduct(c *gin.Context, slug gen.Slug) {
 
 // toGenProductSummary converts a product for a storefront card. T07 uses it too.
 func toGenProductSummary(p models.Product) gen.ProductSummary {
-	status, stockLeft := catalog.StockStatus(p.Stock, p.LowStockThreshold)
+	stockStatus, stockLeft := catalog.StockStatus(p.Stock, p.LowStockThreshold)
 
+	// Empty slices, never null: the card always has a list of labels and colours.
 	labels := make([]gen.Label, len(p.Labels))
-	for i, l := range p.Labels {
-		labels[i] = gen.Label(l)
+	for i, label := range p.Labels {
+		labels[i] = gen.Label(label)
 	}
-
 	colors := make([]gen.ProductColor, len(p.Colors))
-	for i, col := range p.Colors {
-		colors[i] = gen.ProductColor{Name: col.Name, Hex: col.Hex}
+	for i, color := range p.Colors {
+		colors[i] = gen.ProductColor{Name: color.Name, Hex: color.Hex}
 	}
 
 	var cover *gen.Image
-	for _, m := range p.Media {
-		if m.Role == "COVER" {
-			cover = &gen.Image{Url: m.URL, Width: m.Width, Height: m.Height}
+	for _, media := range p.Media {
+		if media.Role == "COVER" {
+			cover = &gen.Image{Url: media.URL, Width: media.Width, Height: media.Height}
 			break
 		}
 	}
@@ -53,7 +102,7 @@ func toGenProductSummary(p models.Product) gen.ProductSummary {
 		PricePesewas: p.PricePesewas,
 		PriceBand:    gen.PriceBand(catalog.PriceBand(p.PricePesewas)),
 		Labels:       labels,
-		StockStatus:  gen.StockStatus(status),
+		StockStatus:  gen.StockStatus(stockStatus),
 		StockLeft:    stockLeft,
 		Cover:        cover,
 		Colors:       colors,

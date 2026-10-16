@@ -92,6 +92,30 @@ func (s *Server) AdminUpdateProduct(c *gin.Context, productID openapi_types.UUID
 	c.JSON(http.StatusOK, toGenAdminProduct(p))
 }
 
+// AdminPatchProduct implements PATCH /admin/products/{productId}.
+func (s *Server) AdminPatchProduct(c *gin.Context, productID openapi_types.UUID) {
+	var req gen.ProductPatch
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "BAD_REQUEST", "The request is not in the expected format.")
+		return
+	}
+	p, err := s.catalog.PatchProduct(c.Request.Context(), productID, fromGenProductPatch(req))
+	if err != nil {
+		s.writeCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toGenAdminProduct(p))
+}
+
+// AdminDeleteProduct implements DELETE /admin/products/{productId}.
+func (s *Server) AdminDeleteProduct(c *gin.Context, productID openapi_types.UUID) {
+	if err := s.catalog.DeleteProduct(c.Request.Context(), productID); err != nil {
+		s.writeCatalogError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func fromGenProductInput(in gen.ProductInput) catalog.ProductInput {
 	out := catalog.ProductInput{
 		ModelName:         in.ModelName,
@@ -128,6 +152,15 @@ func fromGenProductInput(in gen.ProductInput) catalog.ProductInput {
 	}
 	if in.Status != nil {
 		out.Status = string(*in.Status)
+	}
+	return out
+}
+
+func fromGenProductPatch(in gen.ProductPatch) catalog.ProductPatch {
+	out := catalog.ProductPatch{IsVisible: in.IsVisible, Stock: in.Stock}
+	if in.Status != nil {
+		status := string(*in.Status)
+		out.Status = &status
 	}
 	return out
 }

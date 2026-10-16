@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"theblinksframe-backend/internal/httpapi/gen"
 )
@@ -35,10 +34,6 @@ func (unimplemented) AdminTransitionOrder(c *gin.Context, _ gen.OrderId) { notIm
 
 func (unimplemented) AdminUndoOrderTransition(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
 
-func (unimplemented) AdminDeleteProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
-
-func (unimplemented) AdminPatchProduct(c *gin.Context, _ openapi_types.UUID) { notImplemented(c) }
-
 func (unimplemented) AdminListRiders(c *gin.Context) { notImplemented(c) }
 
 func (unimplemented) QuoteCart(c *gin.Context) { notImplemented(c) }
@@ -48,8 +43,6 @@ func (unimplemented) ListBrands(c *gin.Context, _ gen.ListBrandsParams) { notImp
 func (unimplemented) GetBrand(c *gin.Context, _ gen.Slug) { notImplemented(c) }
 
 func (unimplemented) GetMenu(c *gin.Context) { notImplemented(c) }
-
-func (unimplemented) ListProducts(c *gin.Context, _ gen.ListProductsParams) { notImplemented(c) }
 
 func (unimplemented) ListDeliveryZones(c *gin.Context) { notImplemented(c) }
 
