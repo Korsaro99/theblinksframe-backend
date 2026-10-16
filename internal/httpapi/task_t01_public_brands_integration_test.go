@@ -12,8 +12,6 @@ import (
 
 // Task T01: GET /catalog/brands and GET /catalog/brands/{slug}. See docs/tasks/T01-public-brands.md.
 func TestT01PublicBrands(t *testing.T) {
-	pendingTask(t, "T01")
-
 	t.Run("lists brands with products on sale, by name, with counts", func(t *testing.T) {
 		api := newAPI(t)
 		volta := api.brand("Volta", func(b *models.Brand) { b.SellsFor = "MEN" })
