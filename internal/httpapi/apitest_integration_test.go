@@ -85,6 +85,10 @@ func newAPI(t *testing.T) *testAPI {
 // pendingTask skips a test written ahead of its implementation (see docs/tasks). Run it
 // with `make task TASK=T01`. When the task is done, delete the pendingTask line so CI
 // runs the test on every change from then on.
+//
+// It is unused while no card is open, which is expected: keep it for the next card.
+//
+//nolint:unused // used by new task cards' acceptance tests (docs/tasks/README.md)
 func pendingTask(t *testing.T, id string) {
 	t.Helper()
 	tasktest.Pending(t, id)
