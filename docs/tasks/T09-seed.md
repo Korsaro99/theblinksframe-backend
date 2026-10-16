@@ -1,6 +1,6 @@
 # T09: Development sample data (`make seed`)
 
-**Status:** ready · **Depends on:** none · **Size:** M
+**Status:** done · **Depends on:** none · **Size:** M
 **Tests:** `internal/seed/seed_integration_test.go`
 
 ## Goal

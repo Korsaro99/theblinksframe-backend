@@ -1,6 +1,6 @@
 # T04: Admin create and edit product
 
-**Status:** ready · **Depends on:** T03 · **Size:** M
+**Status:** done · **Depends on:** T03 · **Size:** M
 **Endpoints:**
 - `POST /api/v1/admin/products` (`adminCreateProduct`)
 - `PUT /api/v1/admin/products/{productId}` (`adminUpdateProduct`)

@@ -1,6 +1,6 @@
 # T06: Storefront product listing
 
-**Status:** ready · **Depends on:** none · **Size:** M
+**Status:** done · **Depends on:** none · **Size:** M
 **Endpoint:** `GET /api/v1/catalog/products` (`listProducts`, public)
 **Tests:** `internal/httpapi/task_t06_storefront_list_integration_test.go`
 

@@ -1,6 +1,6 @@
 # T05: Admin quick edit and delete product
 
-**Status:** ready · **Depends on:** T03 · **Size:** S
+**Status:** done · **Depends on:** T03 · **Size:** S
 **Endpoints:**
 - `PATCH /api/v1/admin/products/{productId}` (`adminPatchProduct`)
 - `DELETE /api/v1/admin/products/{productId}` (`adminDeleteProduct`)

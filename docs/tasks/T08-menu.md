@@ -1,6 +1,6 @@
 # T08: Menu counts
 
-**Status:** ready · **Depends on:** none · **Size:** S
+**Status:** done · **Depends on:** none · **Size:** S
 **Endpoint:** `GET /api/v1/catalog/menu` (`getMenu`, public)
 **Tests:** `internal/httpapi/task_t08_menu_integration_test.go`
 

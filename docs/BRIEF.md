@@ -17,7 +17,7 @@ This brief records what the developer and the client have decided, what is only 
 - **PROPOSED**: our recommendation, not yet confirmed. Check with the developer before locking it in, especially anything hard to change later (payment provider, data model, API contract).
 - **OPEN**: waiting on the client. Don't guess. Build it so it's easy to change, and leave a `TODO(open):` comment.
 
-Last updated: 2026-10-04.
+Last updated: 2026-10-17.
 
 ---
 
@@ -452,7 +452,7 @@ Any state before DELIVERED ──► CANCELLED
 - **Domain** (DECIDED 2026-10-16): `theblinksframes.com`, registered with Cloudflare Registrar, so its DNS is already on Cloudflare.
   - Site: `https://theblinksframes.com`. `www.theblinksframes.com` redirects to it.
   - API: `https://api.theblinksframes.com`.
-- **Hosting:** OPEN, depending on budget. Angular SSR needs a small Node server; the Go API and Postgres go on a managed host or VPS.
+- **Hosting** (DECIDED 2026-10-04, as a trial): one Oracle Cloud free-tier VM (x86_64). Docker Compose runs Postgres, the Go API and the Angular SSR server on it, reached only through a Cloudflare Tunnel (backend repo, `deploy/`). Nightly encrypted database backups go to Oracle Object Storage (DECIDED 2026-10-17, for now). Who pays for hosting is OPEN (§14 Q4).
 - **CDN** (DECIDED 2026-10-04): Cloudflare (free plan) in front of the VM, with proxied DNS. It handles TLS and caches the hashed static files at the edge. Storefront HTML gets a short cache; `/admin` and the API are never cached. The Angular SSR server runs on the VM, not on Cloudflare Workers.
 - **Analytics:** GA4 and Meta Pixel (OPEN).
 - **Stack details** live in each repo's `CLAUDE.md`.
@@ -504,7 +504,7 @@ GET  /catalog/menu              counts per gender / brand / style / band (feeds 
 POST /cart/quote                items + zone → subtotal, delivery fee, total
 POST /orders                    create website order (AWAITING_PAYMENT)
 POST /orders/:id/pay            { network, momoNumber } → provider.initiate
-POST /orders/track               { number, phone } → tracking (v0.2.0; was GET /orders/:number/status?phone=)
+POST /orders/track              { number, phone } → tracking (v0.2.0; was GET /orders/:number/status?phone=)
 POST /webhooks/payments/:provider
 ```
 
@@ -623,5 +623,7 @@ Still open:
 | 2026-10-14 | API contract v0.2.0: order tracking moves from `GET /orders/{number}/status?phone=` to `POST /orders/track` with `{ number, phone }` in the body. The old path clashed with `/orders/{orderId}` in the Gin router, and the move keeps customers' phone numbers out of URLs (proxy and CDN logs, browser history). The frontend must regenerate its client. |
 | 2026-10-14 | M2 is built in slices: staff auth first, then catalogue CRUD, then media, then the public catalogue and seed. Media storage is still undecided (Cloudinary or Oracle Object Storage). |
 | 2026-10-14 | The first OWNER account is created on startup from `OWNER_BOOTSTRAP_NAME`, `_PHONE` and `_PASSWORD` when no owner exists; it never changes an existing account. Staff permissions until §14 Q15 is answered: STAFF reads everything and handles orders, stocktakes and product visibility; only OWNER creates, edits or deletes brands and products and undoes order moves. |
-| 2026-10-15 | Work is split between a strong model (design, security, money, auth, migrations, spec) and open models (task cards in each repo's `docs/tasks/`, each with tests written in advance and checked against a throwaway version where noted). Agent instructions live in `AGENTS.md` in both repos, which `CLAUDE.md` imports. Backend: admin brand CRUD is the reference example. Frontend: the `/brands` page is the storefront reference, plus `npm run check` and a CI workflow. Sample data in both repos is the design canvas's: 9 products, 5 brands, 106 pairs and GH₵12,600 sold in September. |
+| 2026-10-15 | Work is split between a strong model (design, security, money, auth, migrations, spec) and open models (task cards in each repo's `docs/tasks/`, each with tests written in advance and checked against a throwaway version where noted). Agent instructions live in `AGENTS.md` in both repos, which `CLAUDE.md` imports. Backend: admin brand CRUD is the reference example. Frontend: the `/brands` page is the storefront reference, plus `npm run check` and a CI workflow (on the frontend branch `open-model-setup`, not yet merged into `main`). Sample data in both repos is the design canvas's: 9 products, 5 brands, 106 pairs and GH₵12,600 sold in September. |
 | 2026-10-16 | Domain: `theblinksframes.com`, bought on Cloudflare Registrar. The site is on the bare domain (`www` redirects to it) and the API on `api.theblinksframes.com` (§10). Who pays for hosting is still open (§14 Q4). |
+| 2026-10-16 | The Oracle VM is x86_64, not ARM as noted on 2026-10-04: images are built for `linux/amd64`. Production runs with Docker Compose behind its own Cloudflare Tunnel (`blinks-prod`), with no open ports and a database login for the API that can't change the schema (backend `deploy/README.md`). The storefront demo on `theblinksframes.com` uses a separate tunnel until the switch-over. |
+| 2026-10-17 | Database backups: nightly `pg_dump` by a read-only login, encrypted with age on the VM, uploaded to Oracle Object Storage for now (same account as the VM; a second copy with another company is the next step). Restore drill before launch, then every three months (backend `deploy/README.md`, "Backups"). |

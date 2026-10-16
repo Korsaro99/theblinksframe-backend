@@ -1,6 +1,6 @@
 # T01: Storefront brands list and brand page
 
-**Status:** ready · **Depends on:** none · **Size:** S
+**Status:** done · **Depends on:** none · **Size:** S
 **Endpoints:**
 - `GET /api/v1/catalog/brands` (operation `listBrands`)
 - `GET /api/v1/catalog/brands/{slug}` (`getBrand`)

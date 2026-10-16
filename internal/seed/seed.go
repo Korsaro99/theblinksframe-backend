@@ -1,5 +1,5 @@
 // Package seed loads fake sample data for development (BRIEF §6). It must never run in
-// production. Task T09 (docs/tasks/T09-seed.md) fills it in.
+// production. Built in task T09 (docs/tasks/T09-seed.md).
 package seed
 
 import (

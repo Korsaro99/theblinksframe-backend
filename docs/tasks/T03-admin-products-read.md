@@ -1,6 +1,6 @@
 # T03: Admin product table and product detail
 
-**Status:** ready · **Depends on:** none · **Size:** M
+**Status:** done · **Depends on:** none · **Size:** M
 **Endpoints:**
 - `GET /api/v1/admin/products` (`adminListProducts`)
 - `GET /api/v1/admin/products/{productId}` (`adminGetProduct`)

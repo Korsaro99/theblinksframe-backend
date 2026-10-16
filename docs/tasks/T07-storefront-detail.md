@@ -1,6 +1,6 @@
 # T07: Storefront product page
 
-**Status:** ready · **Depends on:** T06 · **Size:** S
+**Status:** done · **Depends on:** T06 · **Size:** S
 **Endpoint:** `GET /api/v1/catalog/products/{slug}` (`getProduct`, public)
 **Tests:** `internal/httpapi/task_t07_storefront_detail_integration_test.go`
 

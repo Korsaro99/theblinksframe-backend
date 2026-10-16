@@ -1,6 +1,6 @@
 # T02: Delivery zones list and admin riders list
 
-**Status:** ready · **Depends on:** none · **Size:** S
+**Status:** done · **Depends on:** none · **Size:** S
 **Endpoints:**
 - `GET /api/v1/delivery/zones` (`listDeliveryZones`, public)
 - `GET /api/v1/admin/riders` (`adminListRiders`, staff)
