@@ -15,8 +15,6 @@ import (
 // Task T04: POST /admin/products and PUT /admin/products/{productId}.
 // See docs/tasks/T04-admin-products-write.md.
 func TestT04AdminProductsWrite(t *testing.T) {
-	pendingTask(t, "T04")
-
 	minimal := func(brandID uuid.UUID) map[string]any {
 		return map[string]any{
 			"modelName": "Aviator Classic", "brandId": brandID, "category": "SUNGLASSES",
