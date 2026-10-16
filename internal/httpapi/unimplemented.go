@@ -42,8 +42,6 @@ func (unimplemented) ListBrands(c *gin.Context, _ gen.ListBrandsParams) { notImp
 
 func (unimplemented) GetBrand(c *gin.Context, _ gen.Slug) { notImplemented(c) }
 
-func (unimplemented) GetMenu(c *gin.Context) { notImplemented(c) }
-
 func (unimplemented) ListDeliveryZones(c *gin.Context) { notImplemented(c) }
 
 func (unimplemented) CreateOrder(c *gin.Context, _ gen.CreateOrderParams) { notImplemented(c) }
