@@ -1,0 +1,16 @@
+# Cloudflare Tunnel routing for production (deploy/README.md, "How it fits together").
+#
+# cloudflared reads the tunnel's identity (blinks-prod) from TUNNEL_TOKEN in .env, so this file
+# holds only the routing. Rules are checked top to bottom, and the first one whose hostname matches wins.
+# www.theblinksframes.com never gets here: a Cloudflare redirect rule answers it at the edge.
+#
+# Check it after a change (run in ~/the-blinks/prod on the VM):
+#   sudo docker run --rm -v "$PWD/cloudflared:/etc/cloudflared:ro" cloudflare/cloudflared:2026.9.1 \
+#     tunnel --config /etc/cloudflared/config.yml ingress validate
+ingress:
+  - hostname: theblinksframes.com
+    service: http://web:4000
+  - hostname: api.theblinksframes.com
+    service: http://api:8080
+  # Required last rule: anything else (an unknown hostname pointed at the tunnel) gets a 404.
+  - service: http_status:404

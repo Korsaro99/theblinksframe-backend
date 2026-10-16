@@ -1,0 +1,162 @@
+# The Blinks in production, on the VM in ~/the-blinks/prod (deploy/README.md).
+#
+#   web       Angular SSR storefront           theblinksframes.com      → web:4000
+#   api       Go API                           api.theblinksframes.com  → api:8080
+#   postgres  PostgreSQL 18                    private: only api and migrate can reach it
+#   migrate   Liquibase; runs on every `up`, exits, and the API waits for it
+#   tunnel    cloudflared: connects out to Cloudflare and carries the visitors' requests in
+#
+# No ports are published to the VM: the tunnel is the only way in, so the firewall only needs SSH.
+#
+# Secrets and image versions come from .env next to this file (never in git; chmod 600).
+# deploy/.env.example lists them. Settings that are not secret are written out below.
+#
+#   sudo docker compose up -d
+#   sudo docker compose ps
+
+name: blinks-prod
+
+# Shared settings, pulled into each service with `<<: *defaults` (a YAML merge). Docker keeps
+# container logs forever by default; this caps them at 3 × 10 MB per service.
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+
+# For the containers that run our own code or face the internet: the root filesystem is
+# read-only, Linux capabilities are dropped, and nothing can gain privileges (no setuid).
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+
+services:
+  postgres:
+    <<: *defaults
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_DB: blinks
+      # The owner: creates the schema (Liquibase) and is used for backups and admin work.
+      POSTGRES_USER: blinks
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # The API's own login, made by postgres-init/10-app-role.sh on first start: data only.
+      APP_DB_USER: blinks_app
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+      TZ: UTC
+    volumes:
+      # Postgres 18 images keep their data in /var/lib/postgresql/18/docker under this folder.
+      - pgdata:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    networks: [db]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U blinks -d blinks']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Time for a clean shutdown; after it Docker kills the process and Postgres has to recover.
+    stop_grace_period: 60s
+
+  migrate:
+    # Same tag as the API, so a new release brings its own migrations. It runs `update` (apply
+    # what hasn't run yet) on every `docker compose up`, and does nothing when it's up to date.
+    <<: *defaults
+    image: ghcr.io/korsaro99/theblinksframe-backend-migrate:${BACKEND_TAG:?set BACKEND_TAG in .env}
+    command: update
+    # A one-off job: once it has finished, it stays stopped. (Keys written here win over *defaults.)
+    restart: 'no'
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:postgresql://postgres:5432/blinks
+      LIQUIBASE_COMMAND_USERNAME: blinks
+      LIQUIBASE_COMMAND_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    networks: [db]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: [*defaults, *hardened]
+    image: ghcr.io/korsaro99/theblinksframe-backend:${BACKEND_TAG:?set BACKEND_TAG in .env}
+    environment:
+      APP_ENV: production
+      HTTP_ADDR: ':8080'
+      LOG_LEVEL: info
+      # Inside the private db network, so no TLS (sslmode=disable): the traffic never leaves
+      # the VM. APP_DB_PASSWORD must be URL-safe (openssl rand -hex 32).
+      DATABASE_URL: postgres://blinks_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@postgres:5432/blinks?sslmode=disable
+      CORS_ALLOWED_ORIGINS: https://theblinksframes.com
+      COOKIE_DOMAIN: theblinksframes.com
+      COOKIE_SECURE: 'true'
+      # The tunnel container's fixed address (below). Only requests from it may set
+      # X-Forwarded-For; the API takes the right-most address in it, which is the visitor's IP
+      # as Cloudflare saw it (README, "Client IPs").
+      TRUSTED_PROXIES: 172.28.10.10
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      # Only for the first start (README, "First owner account"). Empty means skip.
+      OWNER_BOOTSTRAP_NAME: ${OWNER_BOOTSTRAP_NAME:-}
+      OWNER_BOOTSTRAP_PHONE: ${OWNER_BOOTSTRAP_PHONE:-}
+      OWNER_BOOTSTRAP_PASSWORD: ${OWNER_BOOTSTRAP_PASSWORD:-}
+    networks: [db, edge]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # The image's health check (GET /healthz, which pings the database) tells compose when it's
+    # ready. Docker sends SIGTERM, then the API gets SHUTDOWN_TIMEOUT (15 s) to finish requests.
+    stop_grace_period: 20s
+
+  web:
+    <<: [*defaults, *hardened]
+    # The production build, tagged with its frontend commit. Never a demo-* tag: the demo has
+    # sample data and the /dev/ui page.
+    image: ghcr.io/korsaro99/theblinksframe-frontend:${WEB_TAG:?set WEB_TAG in .env}
+    environment:
+      # Angular only answers requests for these host names (www is redirected by Cloudflare).
+      NG_ALLOWED_HOSTS: theblinksframes.com
+      # Server-side rendering calls the API directly on the Docker network instead of going out
+      # through Cloudflare and back. Browsers still use https://api.theblinksframes.com.
+      API_ORIGIN: http://api:8080
+      # No NOINDEX here: the real shop should be in search results.
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  tunnel:
+    <<: [*defaults, *hardened]
+    # A fixed version, so a restart never brings a surprise upgrade. Bump it on purpose.
+    image: cloudflare/cloudflared:2026.9.1
+    # The routing (which hostname goes to which service) is in cloudflared/config.yml.
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    environment:
+      # The tunnel's secret. Anyone who has it can serve their own pages as theblinksframes.com.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    volumes:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+    networks:
+      edge:
+        # Fixed, because the API trusts forwarded client IPs from this address only.
+        ipv4_address: 172.28.10.10
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+networks:
+  # Postgres and whoever talks to it. `internal` means no route to the internet either.
+  db:
+    internal: true
+  # The tunnel and the two services it sends traffic to. A fixed range so the tunnel's address
+  # above is always valid.
+  edge:
+    ipam:
+      config:
+        - subnet: 172.28.10.0/24
+
+volumes:
+  # The database. `docker compose down` keeps it; `down -v` deletes it, so never use -v here.
+  pgdata:

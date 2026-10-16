@@ -36,7 +36,9 @@ Status: **Done** (in the code and tested), **Planned** (milestone noted), **Open
 | **Errors never leak internals**: a panic returns a generic 500 problem, with details in the logs only | Information disclosure | Done (M1) |
 | **Logs leave out query strings**, and GORM logs parameterised SQL | Phone numbers and tokens in logs | Done (M1) |
 | **CORS allowlist** from env, credentials only for listed origins | Other sites calling the API with the admin's cookies | Done (M1) |
-| **Forwarded headers ignored** unless the proxy is listed in `TRUSTED_PROXIES` | Spoofed client IPs bypassing rate limits | Done (M1, M2); set at deploy |
+| **Forwarded headers ignored** unless the proxy is listed in `TRUSTED_PROXIES` | Spoofed client IPs bypassing rate limits | Done (M1, M2). Production trusts only the tunnel container's fixed address and takes the right-most `X-Forwarded-For` entry, the IP Cloudflare saw (`deploy/README.md`, "Client IPs"); tested locally |
+| **Nothing listens on the internet**: Cloudflare Tunnel connects out from the VM, no ports are published, Postgres sits on an internal Docker network only the API and migrations can reach; `api`, `web` and `tunnel` run read-only with no Linux capabilities | Attacks on open ports; a compromised container reaching the database or changing itself | Done in `deploy/compose.yaml`; tested locally, not yet live |
+| **Separate database logins**: the API connects as `blinks_app` (rows only: no `CREATE`, `ALTER`, `DROP`, `TRUNCATE`); Liquibase migrates as the owner | A SQL injection bug dropping or altering tables | Done in `deploy/` (`postgres-init/10-app-role.sh`); tested locally, not yet live |
 | **Config validated at startup**; secrets only in env; `.env` files (except `.env.example`), private keys and certificates gitignored | Running with missing or unsafe settings; secrets in git | Done (M1) |
 | **bcrypt passwords** (cost 12); passwords over 72 bytes refused, not truncated; unknown logins still run bcrypt against a dummy hash so timing does not reveal which accounts exist | Stolen database turning into stolen passwords; account enumeration | Done (M2) |
 | **One login error** for unknown account, wrong password and disabled account | Account enumeration | Done (M2) |
@@ -65,15 +67,15 @@ Status: **Done** (in the code and tested), **Planned** (milestone noted), **Open
 
 ## 4. Before going live (production checklist)
 
-- [ ] HTTPS only, with an automatic certificate (e.g. Caddy as a reverse proxy). `Secure` cookies need it.
-- [ ] VM firewall: only 80/443 open to the world; SSH by key only, no password login.
-- [ ] Postgres not reachable from the internet. The app uses a database user without DDL rights, and migrations use a separate user.
+- [ ] HTTPS only: Cloudflare terminates TLS at the edge (Always Use HTTPS on) and reaches the VM through the tunnel (`deploy/`). `Secure` cookies need it.
+- [ ] VM firewall: nothing open but SSH (the tunnel needs no inbound ports); SSH by key only, no password login.
+- [ ] Postgres not reachable from the internet. The app uses a database user without DDL rights, and migrations use a separate user. (Both set up by `deploy/compose.yaml`.)
 - [ ] Secrets (DB password, JWT key, payment keys) set on the server only, never in git; know how to rotate each.
 - [ ] Live payment keys only in production; test keys everywhere else.
 - [ ] Daily database backups stored off the VM, **and a restore tested once**.
 - [ ] OS and container image updates on a schedule.
 - [ ] `make seed` refuses to run (`APP_ENV=production`).
-- [ ] `TRUSTED_PROXIES` set to the reverse proxy so rate limits see real client IPs. Behind Cloudflare, the proxy must take the client IP from Cloudflare's header only for Cloudflare's IP ranges.
+- [ ] `TRUSTED_PROXIES` set to the reverse proxy so rate limits see real client IPs. With the tunnel that is the `tunnel` container's fixed address, `172.28.10.10` (`deploy/compose.yaml`); check an admin login is logged with your real IP, not `172.28.10.x`.
 - [ ] `JWT_SECRET` generated with `openssl rand -base64 48`, set only on the server. Changing it ends every access token; refresh tokens keep working.
 - [ ] `COOKIE_DOMAIN=theblinksframes.com` (the shared parent domain); `COOKIE_SECURE=true`.
 - [ ] `CORS_ALLOWED_ORIGINS=https://theblinksframes.com` only: no `www` (Cloudflare redirects it), no `localhost`.
@@ -85,6 +87,7 @@ Status: **Done** (in the code and tested), **Planned** (milestone noted), **Open
 - **Login rate limits live in memory.** A restart resets them, and a second API instance would count separately. Moving to Postgres or Redis is the fix if we ever run more than one instance.
 - **Account lockout can be abused**: anyone who knows the owner's phone number can lock that login for 15 minutes with 10 wrong passwords (the per-IP limit means it takes several IPs). Raising the limit or adding a CAPTCHA are the options if it happens.
 - **The 10-second refresh grace period** lets a thief who replays a refresh token within 10 s of its real use get one 15-minute access token without triggering reuse detection.
+- **The database owner is a superuser**, because the postgres image makes `POSTGRES_USER` one, so migrations run with full rights. Only our own Liquibase changelog runs as it. The API's `blinks_app` can also write to Liquibase's own tables (`databasechangelog`), which only affects migration bookkeeping.
 - **No password change, reset or staff management endpoints yet.** Until they exist, staff accounts and password resets are done in SQL by the developer.
 
 ## 6. Open questions

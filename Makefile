@@ -63,6 +63,28 @@ lint-spec: ## Validate api/openapi.yaml (needs Node.js)
 gen: ## Generate Go server types and interface from api/openapi.yaml
 	go tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml
 
+## --- Release (deploy/README.md) ---------------------------------------------
+
+BACKEND_IMAGE := ghcr.io/korsaro99/theblinksframe-backend
+MIGRATE_IMAGE := ghcr.io/korsaro99/theblinksframe-backend-migrate
+# The CPU of the machine that runs the images. The Oracle VM is x86 (uname -m: x86_64).
+PLATFORM ?= linux/amd64
+COMMIT = $(shell git rev-parse --short HEAD)
+IMAGE_LABELS = --label org.opencontainers.image.revision=$(COMMIT) \
+	--label org.opencontainers.image.source=https://github.com/Korsaro99/theblinksframe-backend
+
+.PHONY: images
+images: ## Build the API and migrations images for the VM, tagged with the git commit
+	@test -z "$$(git status --porcelain)" || { echo "Commit your changes first: images are tagged with the commit they were built from."; exit 1; }
+	docker build --platform $(PLATFORM) $(IMAGE_LABELS) -t $(BACKEND_IMAGE):$(COMMIT) .
+	docker build --platform $(PLATFORM) $(IMAGE_LABELS) -f deploy/migrate.Dockerfile -t $(MIGRATE_IMAGE):$(COMMIT) db
+
+.PHONY: publish
+publish: images ## Build the images and push them to the private GitHub registry
+	docker push $(BACKEND_IMAGE):$(COMMIT)
+	docker push $(MIGRATE_IMAGE):$(COMMIT)
+	@echo "Pushed. On the VM, set BACKEND_TAG=$(COMMIT) in ~/the-blinks/prod/.env"
+
 ## --- Database --------------------------------------------------------------
 
 .PHONY: db-up

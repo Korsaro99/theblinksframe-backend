@@ -1,0 +1,19 @@
+# Files `docker build` never sends to the builder. Secrets first: anything sent could end up
+# in an image layer, and images get pushed to a registry.
+.env
+.env.*
+!.env.example
+deploy/.env
+*.pem
+*.key
+
+.git
+.github
+.idea
+.vscode
+bin/
+tmp/
+*.test
+*.out
+coverage.*
+.DS_Store
