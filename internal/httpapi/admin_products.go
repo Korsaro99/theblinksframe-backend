@@ -62,6 +62,76 @@ func (s *Server) AdminGetProduct(c *gin.Context, productID openapi_types.UUID) {
 	c.JSON(http.StatusOK, toGenAdminProduct(p))
 }
 
+// AdminCreateProduct implements POST /admin/products.
+func (s *Server) AdminCreateProduct(c *gin.Context) {
+	var req gen.ProductInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "BAD_REQUEST", "The request is not in the expected format.")
+		return
+	}
+	p, err := s.catalog.CreateProduct(c.Request.Context(), fromGenProductInput(req))
+	if err != nil {
+		s.writeCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, toGenAdminProduct(p))
+}
+
+// AdminUpdateProduct implements PUT /admin/products/{productId}.
+func (s *Server) AdminUpdateProduct(c *gin.Context, productID openapi_types.UUID) {
+	var req gen.ProductInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "BAD_REQUEST", "The request is not in the expected format.")
+		return
+	}
+	p, err := s.catalog.UpdateProduct(c.Request.Context(), productID, fromGenProductInput(req))
+	if err != nil {
+		s.writeCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toGenAdminProduct(p))
+}
+
+func fromGenProductInput(in gen.ProductInput) catalog.ProductInput {
+	out := catalog.ProductInput{
+		ModelName:         in.ModelName,
+		BrandID:           in.BrandId,
+		Category:          string(in.Category),
+		Gender:            string(in.Gender),
+		Style:             string(in.Style),
+		PricePesewas:      in.PricePesewas,
+		Stock:             in.Stock,
+		LowStockThreshold: in.LowStockThreshold,
+		SKU:               in.Sku,
+		IsVisible:         true, // nil means true
+	}
+	if in.Slug != nil {
+		out.Slug = *in.Slug
+	}
+	if in.Description != nil {
+		out.Description = *in.Description
+	}
+	if in.Labels != nil {
+		out.Labels = make([]string, len(*in.Labels))
+		for i, l := range *in.Labels {
+			out.Labels[i] = string(l)
+		}
+	}
+	if in.Colors != nil {
+		out.Colors = make([]catalog.ColorInput, len(*in.Colors))
+		for i, c := range *in.Colors {
+			out.Colors[i] = catalog.ColorInput{Name: c.Name, Hex: c.Hex}
+		}
+	}
+	if in.IsVisible != nil {
+		out.IsVisible = *in.IsVisible
+	}
+	if in.Status != nil {
+		out.Status = string(*in.Status)
+	}
+	return out
+}
+
 // toGenAdminProduct converts a product for JSON. T04 and T05 use it too.
 func toGenAdminProduct(p catalog.AdminProduct) gen.AdminProduct {
 	stockStatus, _ := catalog.StockStatus(p.Stock, p.LowStockThreshold)
