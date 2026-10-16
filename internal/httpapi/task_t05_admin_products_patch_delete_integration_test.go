@@ -15,8 +15,6 @@ import (
 // Task T05: PATCH and DELETE /admin/products/{productId}.
 // See docs/tasks/T05-admin-products-patch-delete.md.
 func TestT05AdminProductsPatchDelete(t *testing.T) {
-	pendingTask(t, "T05")
-
 	t.Run("patch changes only the fields sent", func(t *testing.T) {
 		api := newAPI(t)
 		p := api.product(api.brand("Volta"), func(p *models.Product) { p.Description = "keep me" })
