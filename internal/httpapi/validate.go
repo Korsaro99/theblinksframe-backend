@@ -128,33 +128,41 @@ func writeValidationProblem(c *gin.Context, err error) {
 	var fields []FieldProblem
 	malformed := false
 	var walk func(error, string)
+	// Type switch, not errors.As. errors.As unwraps a parameter RequestError into the
+	// schema MultiError inside it (kin-openapi reports every schema failure that way),
+	// which drops the parameter name. A bad query value such as pageSize=101 would
+	// then look like a body problem and answer 422 instead of 400.
 	walk = func(err error, param string) {
-		var me openapi3.MultiError
-		var re *openapi3filter.RequestError
-		var se *openapi3.SchemaError
-		switch {
-		case errors.As(err, &me):
-			for _, e := range me {
-				walk(e, param)
+		switch e := err.(type) { //nolint:errorlint // errors.As unwraps RequestError into its schema MultiError and the parameter name is lost
+		case openapi3.MultiError:
+			for _, item := range e {
+				walk(item, param)
 			}
-		case errors.As(err, &re):
-			if re.Parameter != nil {
+		case *openapi3filter.RequestError:
+			if e.Parameter != nil {
 				malformed = true
-				param = re.Parameter.Name
+				param = e.Parameter.Name
 			}
-			if re.Err == nil {
+			if e.Err == nil {
 				malformed = true
-				fields = append(fields, FieldProblem{Field: param, Message: re.Reason})
+				fields = append(fields, FieldProblem{Field: param, Message: e.Reason})
 				return
 			}
-			walk(re.Err, param)
-		case errors.As(err, &se):
-			field := jsonPath(se.JSONPointer())
+			walk(e.Err, param)
+		case *openapi3.SchemaError:
+			field := jsonPath(e.JSONPointer())
 			if param != "" {
 				field = strings.TrimSuffix(param+"."+field, ".")
 			}
-			fields = append(fields, FieldProblem{Field: field, Message: se.Reason})
+			fields = append(fields, FieldProblem{Field: field, Message: e.Reason})
 		default:
+			// oneOf/allOf wrappers are unexported; unwrap one step without errors.As.
+			if u, ok := err.(interface{ Unwrap() error }); ok {
+				if inner := u.Unwrap(); inner != nil {
+					walk(inner, param)
+					return
+				}
+			}
 			// Not JSON, wrong Content-Type, missing body, unparsable parameter.
 			malformed = true
 			fields = append(fields, FieldProblem{Field: param, Message: err.Error()})

@@ -15,8 +15,6 @@ import (
 
 // Task T06: GET /catalog/products (storefront listing). See docs/tasks/T06-storefront-list.md.
 func TestT06StorefrontList(t *testing.T) {
-	pendingTask(t, "T06")
-
 	type world struct {
 		api                                    *testAPI
 		menAviator, unisexRound, womenCat, acc models.Product
