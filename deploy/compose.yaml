@@ -5,6 +5,7 @@
 #   postgres  PostgreSQL 18                    private: only api and migrate can reach it
 #   migrate   Liquibase; runs on every `up`, exits, and the API waits for it
 #   tunnel    cloudflared: connects out to Cloudflare and carries the visitors' requests in
+#   backup    nightly pg_dump, encrypted with age, uploaded off the VM with rclone
 #
 # No ports are published to the VM: the tunnel is the only way in, so the firewall only needs SSH.
 #
@@ -39,12 +40,15 @@ services:
     image: postgres:18.6-alpine
     environment:
       POSTGRES_DB: blinks
-      # The owner: creates the schema (Liquibase) and is used for backups and admin work.
+      # The owner: creates the schema (Liquibase) and is used for admin work.
       POSTGRES_USER: blinks
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       # The API's own login, made by postgres-init/10-app-role.sh on first start: data only.
       APP_DB_USER: blinks_app
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+      # The backup job's login, made by postgres-init/20-backup-role.sh on first start: read only.
+      BACKUP_DB_USER: blinks_backup
+      BACKUP_DB_PASSWORD: ${BACKUP_DB_PASSWORD:?set BACKUP_DB_PASSWORD in .env}
       TZ: UTC
     volumes:
       # Postgres 18 images keep their data in /var/lib/postgresql/18/docker under this folder.
@@ -146,6 +150,62 @@ services:
       api:
         condition: service_healthy
 
+  backup:
+    # Every night at BACKUP_TIME (UTC, which is also Ghana time): pg_dump, encrypt with age,
+    # upload to the bucket (README, "Backups"). Built on the VM from backup/Dockerfile.
+    <<: [*defaults, *hardened]
+    build: ./backup
+    image: blinks-backup:local
+    # Never pulled from a registry: `docker compose pull` skips it, and `up` builds it (from
+    # Docker's cache, in a second, when nothing changed).
+    pull_policy: build
+    environment:
+      PGHOST: postgres
+      PGDATABASE: blinks
+      # Read only (pg_read_all_data): this container can reach the internet, so it doesn't get
+      # the owner's password.
+      PGUSER: blinks_backup
+      PGPASSWORD: ${BACKUP_DB_PASSWORD:?set BACKUP_DB_PASSWORD in .env}
+      BACKUP_TIME: '02:30'
+      # The public half of the age key. The private half (the only way to read a backup) is
+      # never on the VM.
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?set BACKUP_AGE_RECIPIENT in .env}
+      BACKUP_BUCKET: ${BACKUP_BUCKET:?set BACKUP_BUCKET in .env}
+      # Optional: a dead man's switch such as healthchecks.io, which emails when a night is missed.
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+      # The bucket, as the rclone remote `offsite`: Oracle Object Storage through its S3-compatible
+      # API (any S3 storage works; README, "Where the backups go"). Oracle needs path-style URLs
+      # and its own region name. The key may only add and read objects in that one bucket, hence
+      # NO_CHECK_BUCKET (don't try to create it).
+      RCLONE_CONFIG_OFFSITE_TYPE: s3
+      RCLONE_CONFIG_OFFSITE_PROVIDER: ${BACKUP_S3_PROVIDER:-Other}
+      RCLONE_CONFIG_OFFSITE_ENDPOINT: ${BACKUP_S3_ENDPOINT:?set BACKUP_S3_ENDPOINT in .env}
+      RCLONE_CONFIG_OFFSITE_REGION: ${BACKUP_S3_REGION:?set BACKUP_S3_REGION in .env}
+      RCLONE_CONFIG_OFFSITE_FORCE_PATH_STYLE: 'true'
+      RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:?set BACKUP_S3_ACCESS_KEY_ID in .env}
+      RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:?set BACKUP_S3_SECRET_ACCESS_KEY in .env}
+      RCLONE_CONFIG_OFFSITE_NO_CHECK_BUCKET: 'true'
+      # No config file: everything is in the variables above.
+      RCLONE_CONFIG: /dev/null
+      # Ride out a network blip: up to 5 tries, 2 minutes apart, before the night counts as failed.
+      RCLONE_RETRIES: '5'
+      RCLONE_RETRIES_SLEEP: 2m
+    # The only writable place (the filesystem is read-only), and it's RAM: the readable dump
+    # never reaches a disk. It holds the dump and its encrypted copy for a moment (a few MB for
+    # now); raise the size if a backup ever fails with "No space left on device".
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    # db to reach Postgres, backup to reach the internet. It can't reach api or web.
+    networks: [db, backup]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'backup.sh', 'health']
+      interval: 10m
+      timeout: 5s
+      start_period: 1m
+
 networks:
   # Postgres and whoever talks to it. `internal` means no route to the internet either.
   db:
@@ -156,6 +216,8 @@ networks:
     ipam:
       config:
         - subnet: 172.28.10.0/24
+  # The backup job's way out to the bucket.
+  backup: {}
 
 volumes:
   # The database. `docker compose down` keeps it; `down -v` deletes it, so never use -v here.
