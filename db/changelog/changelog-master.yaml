@@ -7,3 +7,4 @@ databaseChangeLog:
   - include: { file: sql/0004-delivery.sql, relativeToChangelogFile: true }
   - include: { file: sql/0005-orders.sql, relativeToChangelogFile: true }
   - include: { file: sql/0006-settings.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0007-order-moves.sql, relativeToChangelogFile: true }

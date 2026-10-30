@@ -57,7 +57,11 @@ Status: **Done** (in the code and tested), **Planned** (milestone noted), **Open
 | **Server-side prices**: the cart and orders are priced by the API; only staff can override (manual orders) | Customers changing prices | Done in the contract; code in M4 |
 | **Payments: webhook signature + server-side verify** of amount and currency before PAID; idempotent per provider reference | Forged or replayed payment notices, underpayment | Planned (M4) |
 | **Idempotency-Key** on order creation | Duplicate orders from retries | Planned (M4) |
-| **Order state machine in one place** with tests; every change is an event with an actor | Skipped steps; no audit trail | Planned (M5) |
+| **Order state machine in one place** with tests; every change is an event with an actor | Skipped steps; no audit trail | Done (M5): `internal/orders/statemachine.go` (`Next`, `CanTransition`), unit-tested; every move writes an `order_events` row with the staff member, in the same transaction as the status |
+| **No button marks an order PAID**: `allowedTransitions` never offers PAID, and the transition endpoint refuses it; an order becomes paid only when a payment is recorded (confirm-payment, or the provider webhook after verify) | Goods leaving the shop unpaid through a mis-click or a malicious staff account | Done (M5), acceptance-tested; confirm-payment and webhooks still to build (M4) |
+| **Concurrent order moves are serialised**: each move locks the order row (`SELECT … FOR UPDATE`) and re-checks the allowed moves after the lock | Two people cancelling at once and the stock coming back twice | Done (M5), with a concurrent-cancel test that fails without the lock |
+| **Stock never goes negative and paid orders are never lost**: stock is taken with `UPDATE … WHERE stock >= qty`; a short line flags the order for the owner (`needsAttention`) instead of failing; `order_items.stock_deducted` records what was taken, so a cancel gives back only that | Overselling; stock counts drifting after cancels | Done (M5), acceptance-tested |
+| **Undo is OWNER-only, one step at a time, and can't undo a payment**: the Casbin policy limits the route, `canUndo` asks the same policy, each undo is recorded as an event pointing at the step it reverses (unique, so a step is undone at most once) | Staff quietly rewriting an order's history; undo used to "unpay" an order | Done (M5), acceptance-tested |
 | **Catalogue writes are OWNER-only** (brands, product create/edit/delete); STAFF only does stocktakes and show/hide | Insider misuse, accidental price changes | Done (M2): brands, and products in task cards T04 and T05 |
 | **Public catalogue shows only published, visible products and no admin fields** (stock count, SKU, status); unknown and draft products give the same 404 | Leaking unreleased products or business data | Done (M2, task cards T01, T06, T07, T08), with acceptance tests |
 | **Search text is escaped** before `LIKE`/`ILIKE` (`%`, `_` are plain characters) and every query uses placeholders; sort orders come from a fixed list | SQL injection; expensive wildcard searches | Done (M2): `escapeLike` in `internal/catalog/products.go`; rule in AGENTS.md and the task-card review checklist |
@@ -93,10 +97,12 @@ Status: **Done** (in the code and tested), **Planned** (milestone noted), **Open
 - **The backups are in the same Oracle account as the VM.** If that account is suspended, reclaimed or locked out, both go together. Until a second copy lives with another company (Cloudflare R2 or Backblaze B2; README, "Where the backups go"), the encrypted file from each restore drill kept on the developer's Mac is the copy that survives.
 - **The VM's backup key can add objects to the bucket**, so someone on the VM could fill it with junk (up to the 20 GB free limit). They can't read old backups (encrypted for a key the VM doesn't have), delete or overwrite them (the policy allows only create, inspect and read).
 - **Backups hold customer data for up to a year** (monthly copies). Shorten the `monthly/` rule if the privacy policy (§6) sets a shorter limit.
+- **STAFF can cancel a paid order.** The policy lets staff move orders on, and cancel is one of the moves. The stock comes back, but the money doesn't: refunds are OPEN (BRIEF §8), so the payment stays SUCCESS and the order simply stops counting as revenue. If cancelling paid orders should be the owner's call, that needs a rule in the policy or the state machine (§6).
+- **Customer messages are not sent yet.** Moves record `notifiedVia: NONE` and ignore `notifyCustomer` until the outbox is built (M5, channel OPEN).
 - **No password change, reset or staff management endpoints yet.** Until they exist, staff accounts and password resets are done in SQL by the developer.
 
 ## 6. Open questions
 
 - Privacy policy content and how long to keep customer data (BRIEF §4.1, policy pages OPEN).
 - Who handles refunds and how (BRIEF §8, OPEN), which affects who may call `Refund`.
-- What STAFF may do (BRIEF §14 Q15). The current policy is in `internal/auth/rbac_policy.csv`.
+- What STAFF may do (BRIEF §14 Q15). The current policy is in `internal/auth/rbac_policy.csv`. In particular: may STAFF cancel an order that has been paid?

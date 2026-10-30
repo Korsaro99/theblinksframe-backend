@@ -87,7 +87,7 @@ None right now. The next cards wait for the strong-model steps below.
 | Product media: list, reorder, delete, set cover | Media storage decision (Cloudinary or Oracle) and the upload endpoint, which is security-sensitive (strong model) |
 | Settings `GET/PUT /admin/settings` | Settings schema and spec (strong model) |
 | Delivery zone and rider admin CRUD | Spec for Settings screens (strong model) |
-| Admin order list, pipeline counts, order detail (read-only) | Orders package: creation, state machine, events (strong model, M4/M5) |
+| Admin order list and pipeline counts | Nothing: the state machine and order detail are done, so the card can be written (strong model) |
 | Customer order tracking `POST /orders/track` | Order creation (M4); tests for the enumeration rules written by the strong model |
 | Cart quote `POST /cart/quote` | "Buy 2" deal and delivery fee rules (OPEN, BRIEF §9), then quote rules design |
 | Excel export | Analytics queries (strong model, M6) |

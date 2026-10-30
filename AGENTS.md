@@ -121,7 +121,7 @@ internal/
   auth/            staff users, JWT, refresh-token rotation, CSRF, rate limits, Casbin
   catalog/         brands, products, colours, media, price bands, menu counts, sales figures
   delivery/        delivery zones and riders (cart quote: later)
-  orders/          (M4/M5) orders, items, state machine, events, stock, manual WhatsApp and shop orders
+  orders/          order detail, state machine, transitions, undo, stock; (M4/M5) creation, manual WhatsApp and shop orders
   payments/        (M4) Provider interface; paystack/, hubtel/, fake/; webhooks
   notify/          (M5) outbox, WhatsApp and SMS senders, templates from settings
   analytics/       (M6) dashboard queries, rankings, brand table, insights, xlsx export
@@ -152,13 +152,16 @@ Packages marked with a milestone don't exist yet: they are created when their mi
   - Compute reporting buckets (day, weekday, month) in `Africa/Accra` (UTC+0).
   - JSON timestamps are RFC 3339.
 - **Phones:** normalise to E.164 (`+233…`) on input with `phone.Normalise`.
-- **Order state machine:**
-  - One place defines the allowed moves (BRIEF §7.1), exposed as `CanTransition(from, to)`.
-  - Admin order responses include `allowedTransitions` so the UI never guesses.
-- **Every transition runs in one DB transaction**, which:
-  - writes an `OrderEvent`;
-  - adjusts stock: down on `→ PAID`, back up on `→ CANCELLED`;
-  - adds the customer notification to an **outbox** table, sent after commit.
+- **Order state machine** (`internal/orders/statemachine.go`):
+  - One place defines the allowed moves (BRIEF §7.1): `Next(from, fulfilment)` and `CanTransition(from, to, fulfilment)`. Fulfilment matters because a packed order goes out for delivery or waits for pickup.
+  - Admin order responses include `allowedTransitions` (`StaffMoves`) so the UI never guesses. It never offers `PAID`: only a recorded payment marks an order paid.
+  - Undo (OWNER) reverses the newest step not yet undone, one step per call. An order's creation and its payment can't be undone.
+- **Every transition runs in one DB transaction**, through `move()` in `internal/orders/moves.go`, the only code that writes `orders.status`. It:
+  - locks the order row (`FOR UPDATE`) and re-checks the move after the lock;
+  - writes an `OrderEvent` (undos point at the event they reverse);
+  - adjusts stock: down when the order enters a status that holds stock (`HoldsStock`: PAID onwards), back up when it leaves them (`→ CANCELLED`, or an undo); `order_items.stock_deducted` records what was taken;
+  - adds the customer notification to an **outbox** table, sent after commit (TODO(M5): not built yet).
+  - Payment code (M4) moves orders to PAID through a new `orders.Store` method that calls `move()`, never by writing the status itself.
 - **Stock never goes negative.** Use `UPDATE … SET stock = stock - $1 WHERE id = $2 AND stock >= $1`. If that fails for a paid order, flag the order for the owner instead of losing the payment.
 - **Order items** snapshot the product name, brand name, unit price (charged) and list price (catalogue). Only manual (WhatsApp and shop) orders may set the unit price; website orders always charge the catalogue price.
 - **Database constraints are the last line of defence:** `CHECK (stock >= 0)`, totals that must add up, delivery fields required for DELIVERY, and others. Map constraint violations to clear problem responses rather than 500s.
@@ -205,7 +208,7 @@ Packages marked with a milestone don't exist yet: they are created when their mi
 1. **Skeleton:** done (M1).
 2. **OpenAPI spec:** v0.2.0.
 3. **Auth and catalogue (M2):** staff auth done; brand CRUD done (reference example); admin products, the public catalogue and the seed done (task cards T01, T03–T09); media waits on the storage decision.
-4. **Orders:** delivery zones list and admin riders list done (T02); cart quote; order creation; state machine, events and stock; manual WhatsApp and shop orders.
+4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; cart quote; order creation; manual WhatsApp and shop orders.
 5. **Payments:** the interface plus the `fake` provider; then the chosen provider in sandbox; webhooks plus verify; auto-cancel job.
 6. **Notifications:** outbox and senders.
 7. **Analytics:** summary, revenue series (monthly and yearly), best sellers, ranking, brand table; xlsx export.

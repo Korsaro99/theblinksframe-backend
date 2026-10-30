@@ -16,6 +16,7 @@ import (
 	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi/gen"
 	"theblinksframe-backend/internal/models"
+	"theblinksframe-backend/internal/orders"
 )
 
 // AuthService is what the HTTP layer needs from internal/auth. It is an interface so that
@@ -45,6 +46,7 @@ type Server struct {
 	unimplemented
 	catalog  *catalog.Store
 	delivery *delivery.Store
+	orders   *orders.Store
 	auth     AuthService
 	authz    Authorizer
 	limiter  LoginLimiter
