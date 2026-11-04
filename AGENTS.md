@@ -29,6 +29,7 @@ This repo is the REST API for The Blinks storefront and admin back office (sungl
   - Database logic lives in a package such as `internal/catalog`, as methods on `Store`.
   - HTTP handlers live in `internal/httpapi`, one file per area (e.g. `admin_brands.go`). Handlers are thin: decode, call one `Store` method, map errors, write JSON.
   - Copy `internal/catalog/brands.go` and `internal/httpapi/admin_brands.go`; they are the reference example.
+- **Uploads** are the one exception to the 1 MiB body limit: an operation with `x-upload-max-bytes` in the spec gets that limit, and its body is not read by the validator (the handler checks it). Don't add the extension to JSON operations.
 - **Request checking happens before your handler.** `internal/httpapi/validate.go` checks every request against `api/openapi.yaml`: login, CSRF token, staff role, required fields, types, enums. Don't repeat those checks; only check business rules the spec can't express.
 - **Implementing an endpoint:**
   - add a method on `*Server` with the exact signature from `gen.ServerInterface`;
@@ -45,7 +46,8 @@ This repo is the REST API for The Blinks storefront and admin back office (sungl
 - **Shared business rules**, which you call but don't change:
   - `catalog.PriceBand`, `PriceBandRange`, `StockStatus` and `Slugify`;
   - `catalog.ThisMonth` and `Last30Days`;
-  - `Store.ProductSales`, the only place that decides which orders count as sales.
+  - `Store.ProductSales`, the only place that decides which orders count as sales;
+  - `delivery.Fee`, the only place that prices delivery (zone fee, free from the zone's threshold).
 - **Tests:**
   - Acceptance tests drive the real router and a real Postgres. See `internal/httpapi/admin_brands_integration_test.go`, `apitest_integration_test.go` (the `api.owner().get(...)` harness) and `fixtures_integration_test.go`.
   - Table-driven unit tests for pure functions.
@@ -96,11 +98,12 @@ Besides shipping the shop, this project is how the developer learns to **build a
   - **CI:** GitHub Actions (`.github/workflows/ci.yml`): lint, spec lint, generated code check, unit and integration tests.
   - **Local dev:** `docker-compose` for Postgres and Liquibase, plus a `Makefile`. The API runs on the host.
   - **Production:** `deploy/compose.yaml` on the VM (Postgres, migrations, API, the frontend's SSR server, a Cloudflare Tunnel and nightly encrypted backups). Images go to the private GitHub registry with `make publish`. Steps in `deploy/README.md`.
+- **DECIDED 2026-11-04** with the developer:
+  - **Media:** Oracle Object Storage through its S3-compatible API (`minio-go`), behind the `media.Storage` interface; a public-read `blinks-media` bucket and a private `blinks-media-originals` bucket (`deploy/README.md`, "Media"). Uploads go through the API: type checked by content, photos resized to 400/800/1600 px with `golang.org/x/image`, turned upright and re-encoded without metadata; videos stored as uploaded. No ffmpeg until the VM has more than the 1 GB micro shape.
 - **PROPOSED** (decide when the milestone starts):
-  - **Media (M2):** undecided between Cloudinary's free plan and Oracle Object Storage, behind a `MediaStore` interface. Store URL, width and height; keep originals; limit upload size and type.
   - **Excel export (Phase 2):** `excelize`.
-  - **Background jobs (M4 onwards):** goroutine tickers inside the API binary, made safe with a Postgres advisory lock. They cover:
-    - auto-cancelling unpaid website orders after 30 minutes;
+  - **Background jobs (M4 onwards):** goroutine tickers inside the API binary, made safe with a Postgres advisory lock. Built for orders (`orders.Store.Housekeep`, run from `cmd/api`); confirm the approach. They cover:
+    - auto-cancelling unpaid website orders after 30 minutes, and checking pending payments whose webhook never came (built);
     - sending queued notifications;
     - nightly insights;
     - the Monday WhatsApp summary.
@@ -119,10 +122,12 @@ internal/
   models/          GORM structs matching the Liquibase schema
   phone/           E.164 normalisation
   auth/            staff users, JWT, refresh-token rotation, CSRF, rate limits, Casbin
-  catalog/         brands, products, colours, media, price bands, menu counts, sales figures
+  catalog/         brands, products, colours, price bands, menu counts, sales figures
+  media/           photo and video uploads: checks, resizing, Storage (S3/Oracle, local folder, memory)
   delivery/        delivery zones and riders (cart quote: later)
-  orders/          (M4/M5) orders, items, state machine, events, stock, manual WhatsApp and shop orders
-  payments/        (M4) Provider interface; paystack/, hubtel/, fake/; webhooks
+  orders/          order detail, state machine, transitions, undo, stock, manual and website orders, payments, housekeeping
+  payments/        Provider interface and fake/ (development only); (later) paystack/ or hubtel/
+  platform/ratelimit/  per-IP request limits for public endpoints (in memory)
   notify/          (M5) outbox, WhatsApp and SMS senders, templates from settings
   analytics/       (M6) dashboard queries, rankings, brand table, insights, xlsx export
   settings/        (later) shop settings
@@ -152,13 +157,17 @@ Packages marked with a milestone don't exist yet: they are created when their mi
   - Compute reporting buckets (day, weekday, month) in `Africa/Accra` (UTC+0).
   - JSON timestamps are RFC 3339.
 - **Phones:** normalise to E.164 (`+233…`) on input with `phone.Normalise`.
-- **Order state machine:**
-  - One place defines the allowed moves (BRIEF §7.1), exposed as `CanTransition(from, to)`.
-  - Admin order responses include `allowedTransitions` so the UI never guesses.
-- **Every transition runs in one DB transaction**, which:
-  - writes an `OrderEvent`;
-  - adjusts stock: down on `→ PAID`, back up on `→ CANCELLED`;
-  - adds the customer notification to an **outbox** table, sent after commit.
+- **Order state machine** (`internal/orders/statemachine.go`):
+  - One place defines the allowed moves (BRIEF §7.1): `Next(from, fulfilment)` and `CanTransition(from, to, fulfilment)`. Fulfilment matters because a packed order goes out for delivery or waits for pickup.
+  - Admin order responses include `allowedTransitions` (`StaffMoves`) so the UI never guesses. It never offers `PAID`: only a recorded payment marks an order paid.
+  - Undo (OWNER) reverses the newest step not yet undone, one step per call. An order's creation and its payment can't be undone.
+- **Every transition runs in one DB transaction**, through `move()` in `internal/orders/moves.go`, the only code that writes `orders.status`. It:
+  - locks the order row (`FOR UPDATE`) and re-checks the move after the lock;
+  - writes an `OrderEvent` (undos point at the event they reverse);
+  - adjusts stock: down when the order enters a status that holds stock (`HoldsStock`: PAID onwards), back up when it leaves them (`→ CANCELLED`, or an undo); `order_items.stock_deducted` records what was taken;
+  - adds the customer notification to an **outbox** table, sent after commit (TODO(M5): not built yet).
+  - Payments go through `payManually` (`internal/orders/payments.go`) or `applySuccess` (`internal/orders/online.go`, after `Verify`), which record the payment and call `move()`; nothing else marks an order paid.
+- **Manual orders** (`orders.Store.CreateManual`) start as AWAITING_PAYMENT; with a payment they move to PAID in the same transaction, and a paid SHOP pickup on to DELIVERED (handed over at the counter). `Idempotency-Key` is claimed in that transaction (`claimKey`).
 - **Stock never goes negative.** Use `UPDATE … SET stock = stock - $1 WHERE id = $2 AND stock >= $1`. If that fails for a paid order, flag the order for the owner instead of losing the payment.
 - **Order items** snapshot the product name, brand name, unit price (charged) and list price (catalogue). Only manual (WhatsApp and shop) orders may set the unit price; website orders always charge the catalogue price.
 - **Database constraints are the last line of defence:** `CHECK (stock >= 0)`, totals that must add up, delivery fields required for DELIVERY, and others. Map constraint violations to clear problem responses rather than 500s.
@@ -169,7 +178,8 @@ Packages marked with a milestone don't exist yet: they are created when their mi
     - a server-side `Verify` call confirms the amount and currency (`GHS`).
   - Webhooks are idempotent on `(provider, providerReference)` (unique constraint). Store the raw payload, and return 200 quickly.
   - Test and live keys come from env.
-  - The provider (Paystack or Hubtel) is **OPEN**. Build against a `fake` provider first, and add the real one only after the developer confirms.
+  - The provider (Paystack or Hubtel) is **OPEN**. The `fake` provider (`internal/payments/fake`) is built and drives the tests; add the real one only after the developer confirms, and make it pass the same webhook and verify tests.
+  - Online payment flow (`internal/orders/online.go`): `StartPayment` records a PENDING attempt (our reference), then calls `Initiate` outside any transaction; `SettlePayment` (webhook or housekeeping) calls `Verify` and only then `applySuccess`. A payment arriving for an order that isn't awaiting payment is kept and the order flagged, never dropped.
 - **Revenue definition:** BRIEF §7.4 (PROPOSED: count by `paidAt`, excluding cancelled and refunded orders). It lives in one place, `countedOrders` in `internal/catalog/sales.go`, so changing the rule is a one-line change.
 - **Notifications:**
   - Templates come from Settings.
@@ -204,9 +214,9 @@ Packages marked with a milestone don't exist yet: they are created when their mi
 
 1. **Skeleton:** done (M1).
 2. **OpenAPI spec:** v0.2.0.
-3. **Auth and catalogue (M2):** staff auth done; brand CRUD done (reference example); admin products, the public catalogue and the seed done (task cards T01, T03–T09); media waits on the storage decision.
-4. **Orders:** delivery zones list and admin riders list done (T02); cart quote; order creation; state machine, events and stock; manual WhatsApp and shop orders.
-5. **Payments:** the interface plus the `fake` provider; then the chosen provider in sandbox; webhooks plus verify; auto-cancel job.
+3. **Auth and catalogue (M2):** staff auth done; brand CRUD done (reference example); admin products, the public catalogue and the seed done (task cards T01, T03–T09); media upload, cover, order and delete done.
+4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; manual WhatsApp and shop orders and confirm-payment done; website order creation done; cart quote.
+5. **Payments:** the interface, the `fake` provider, pay, payment state, webhooks plus verify, and the housekeeping job (auto-cancel, missed webhooks) done; then the chosen provider in sandbox.
 6. **Notifications:** outbox and senders.
 7. **Analytics:** summary, revenue series (monthly and yearly), best sellers, ranking, brand table; xlsx export.
 8. **Phase 2:** insights (formulas in BRIEF §7.5) and the weekly summary job.

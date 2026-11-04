@@ -98,6 +98,16 @@ services:
       OWNER_BOOTSTRAP_NAME: ${OWNER_BOOTSTRAP_NAME:-}
       OWNER_BOOTSTRAP_PHONE: ${OWNER_BOOTSTRAP_PHONE:-}
       OWNER_BOOTSTRAP_PASSWORD: ${OWNER_BOOTSTRAP_PASSWORD:-}
+      # Photos and videos in Oracle Object Storage (README, "Media"). Empty MEDIA_STORE
+      # means uploads are off; the rest of the shop works without it.
+      MEDIA_STORE: ${MEDIA_STORE:-}
+      MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:-}
+      MEDIA_S3_REGION: ${MEDIA_S3_REGION:-}
+      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-}
+      MEDIA_S3_ORIGINALS_BUCKET: ${MEDIA_S3_ORIGINALS_BUCKET:-}
+      MEDIA_S3_ACCESS_KEY_ID: ${MEDIA_S3_ACCESS_KEY_ID:-}
+      MEDIA_S3_SECRET_ACCESS_KEY: ${MEDIA_S3_SECRET_ACCESS_KEY:-}
+      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-}
     networks: [db, edge]
     depends_on:
       postgres:

@@ -54,14 +54,17 @@ func Start(t *testing.T) *Postgres {
 func StartMain() (pg *Postgres, stop func(), err error) {
 	ctx := context.Background()
 	var cleanups []func()
-	stop = func() {
+	// A local copy: the error returns below set the named result stop to nil before this
+	// deferred cleanup runs.
+	cleanup := func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {
 			cleanups[i]()
 		}
 	}
+	stop = cleanup
 	defer func() {
 		if err != nil {
-			stop()
+			cleanup()
 		}
 	}()
 

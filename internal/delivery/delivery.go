@@ -43,3 +43,15 @@ func (s *Store) ListActiveRiders(ctx context.Context) ([]models.Rider, error) {
 	}
 	return riders, nil
 }
+
+// Fee is what delivery to zone costs for an order whose items come to subtotalPesewas: the
+// zone's fee, or nothing once the subtotal reaches the zone's free-delivery threshold. It is
+// the only copy of the rule, for manual orders now and the cart quote later.
+// TODO(open): fees, thresholds and the "Buy 2" deal (BRIEF §9, §14 q7). Whether "free above"
+// includes the threshold itself is PROPOSED: here an order of exactly the threshold is free.
+func Fee(zone models.DeliveryZone, subtotalPesewas int64) int64 {
+	if zone.FreeAbovePesewas != nil && subtotalPesewas >= *zone.FreeAbovePesewas {
+		return 0
+	}
+	return zone.FeePesewas
+}

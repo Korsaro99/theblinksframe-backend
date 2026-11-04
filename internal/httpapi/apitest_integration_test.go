@@ -21,7 +21,10 @@ import (
 	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/delivery"
+	"theblinksframe-backend/internal/media"
 	"theblinksframe-backend/internal/models"
+	"theblinksframe-backend/internal/orders"
+	"theblinksframe-backend/internal/payments/fake"
 	"theblinksframe-backend/internal/platform/db/dbtest"
 	"theblinksframe-backend/internal/tasktest"
 )
@@ -54,11 +57,21 @@ type testAPI struct {
 	t      *testing.T
 	db     *gorm.DB
 	router *gin.Engine
-	seq    int // makes fixture names unique
+	orders *orders.Store  // for running Housekeep as the background job would
+	pay    *fake.Provider // the payment provider behind the router
+	files  *media.Memory  // where uploaded media go
+	seq    int            // makes fixture names unique
 }
 
-// newAPI empties the database and builds the real router on top of it.
+// newAPI empties the database and builds the real router on top of it. Its fake payment
+// provider settles at once: a payment stays PENDING until a webhook or Housekeep asks about it.
 func newAPI(t *testing.T) *testAPI {
+	t.Helper()
+	return newAPIWith(t, fake.New([]byte(testWebhookSecret), 0, nil))
+}
+
+// newAPIWith is newAPI with a payment provider of the test's choosing.
+func newAPIWith(t *testing.T, pay *fake.Provider) *testAPI {
 	t.Helper()
 	dbtest.Reset(t, testDB)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -66,6 +79,8 @@ func newAPI(t *testing.T) *testAPI {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store := orders.NewStore(testDB, pay)
+	files := media.NewMemory()
 	router, err := NewRouter(Deps{
 		Log:          log,
 		DB:           fakePinger{},
@@ -75,12 +90,17 @@ func newAPI(t *testing.T) *testAPI {
 		Cookies:      CookieOptions{Secure: true},
 		Catalog:      catalog.NewStore(testDB, func() time.Time { return testNow }),
 		Delivery:     delivery.NewStore(testDB),
+		Orders:       store,
+		Payments:     pay,
+		Media:        media.NewLibrary(testDB, files, log),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &testAPI{t: t, db: testDB, router: router}
+	return &testAPI{t: t, db: testDB, router: router, orders: store, pay: pay, files: files}
 }
+
+const testWebhookSecret = "integration-webhook-secret-32-bytes!!"
 
 // pendingTask skips a test written ahead of its implementation (see docs/tasks). Run it
 // with `make task TASK=T01`. When the task is done, delete the pendingTask line so CI
@@ -133,8 +153,17 @@ func (c *client) put(path string, body any) *response   { return c.do(http.Metho
 func (c *client) patch(path string, body any) *response { return c.do(http.MethodPatch, path, body) }
 func (c *client) delete(path string) *response          { return c.do(http.MethodDelete, path, nil) }
 
+// postWithKey sends a POST with an Idempotency-Key header.
+func (c *client) postWithKey(path string, body any, key string) *response {
+	return c.doWithHeaders(http.MethodPost, path, body, map[string]string{"Idempotency-Key": key})
+}
+
 // do sends a request. body is encoded as JSON unless it is nil or already a string.
 func (c *client) do(method, path string, body any) *response {
+	return c.doWithHeaders(method, path, body, nil)
+}
+
+func (c *client) doWithHeaders(method, path string, body any, headers map[string]string) *response {
 	c.api.t.Helper()
 	var r io.Reader
 	switch b := body.(type) {
@@ -151,6 +180,9 @@ func (c *client) do(method, path string, body any) *response {
 	req := httptest.NewRequest(method, path, r)
 	if r != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 	if c.csrf != "" && method != http.MethodGet {
 		req.Header.Set(csrfHeader, c.csrf)

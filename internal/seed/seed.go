@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"theblinksframe-backend/internal/models"
+	"theblinksframe-backend/internal/orders"
 )
 
 var (
@@ -356,13 +357,16 @@ func insertOneOrder(tx *gorm.DB, products map[string]models.Product, zones map[s
 		return fmt.Errorf("insert order: %w", err)
 	}
 
+	// The products' stock is already what is left after these sales, so lines of orders
+	// past payment are marked as taken: cancelling one gives its pairs back.
+	stockTaken := orders.HoldsStock(orders.Status(o.status))
 	for _, it := range o.items {
 		p := products[it.product]
 		if err := tx.Exec(`INSERT INTO order_items (
 				order_id, product_id, product_name_snapshot, brand_name_snapshot,
-				quantity, unit_price_pesewas, list_price_pesewas)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			orderID, p.ID, p.ModelName, p.Brand.Name, it.qty, p.PricePesewas, p.PricePesewas,
+				quantity, unit_price_pesewas, list_price_pesewas, stock_deducted)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			orderID, p.ID, p.ModelName, p.Brand.Name, it.qty, p.PricePesewas, p.PricePesewas, stockTaken,
 		).Error; err != nil {
 			return fmt.Errorf("item %s: %w", it.product, err)
 		}

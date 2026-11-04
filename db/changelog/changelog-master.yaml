@@ -7,3 +7,7 @@ databaseChangeLog:
   - include: { file: sql/0004-delivery.sql, relativeToChangelogFile: true }
   - include: { file: sql/0005-orders.sql, relativeToChangelogFile: true }
   - include: { file: sql/0006-settings.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0007-order-moves.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0008-idempotency-keys.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0009-online-payments.sql, relativeToChangelogFile: true }
+  - include: { file: sql/0010-media-uploads.sql, relativeToChangelogFile: true }

@@ -57,6 +57,38 @@ type Config struct {
 
 	// Owner, when set, creates the first OWNER account on startup if there is none yet.
 	Owner *OwnerBootstrap
+
+	// PaymentProvider takes online payments: "fake" (development and tests only), or ""
+	// for none, in which case the website can't take payments. TODO(open): Paystack or
+	// Hubtel (BRIEF §8).
+	PaymentProvider string
+	// FakePaymentWebhookSecret signs the fake provider's webhooks. At least 32 bytes.
+	FakePaymentWebhookSecret []byte
+	// FakePaymentDelay is how long a fake payment stays pending, like a customer reading
+	// the prompt on their phone.
+	FakePaymentDelay time.Duration
+	// HousekeepingInterval is how often the API checks pending payments with the provider
+	// and cancels unpaid website orders.
+	HousekeepingInterval time.Duration
+
+	// MediaStore keeps uploaded photos and videos: "s3" (Oracle Object Storage, or any
+	// S3-compatible storage), "local" (a folder, development only) or "" (uploads off).
+	MediaStore string
+	// MediaLocalDir is the folder for MEDIA_STORE=local.
+	MediaLocalDir string
+	// MediaPublicBaseURL is where customers load media files from.
+	MediaPublicBaseURL string
+	MediaS3            MediaS3
+}
+
+// MediaS3 reaches the media buckets (MEDIA_STORE=s3).
+type MediaS3 struct {
+	Endpoint        string
+	Region          string
+	Bucket          string
+	OriginalsBucket string // private; empty means originals are not kept
+	AccessKeyID     string
+	SecretAccessKey string
 }
 
 // OwnerBootstrap is the first OWNER account, created once from env on an empty database.
@@ -177,6 +209,12 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 
 	errs = append(errs, loadAuth(&cfg, get)...)
 
+	cfg.PaymentProvider = get("PAYMENT_PROVIDER", "")
+	cfg.FakePaymentDelay = getDuration("FAKE_PAYMENT_DELAY", 5*time.Second)
+	cfg.HousekeepingInterval = getDuration("HOUSEKEEPING_INTERVAL", 30*time.Second)
+	errs = append(errs, loadPayments(&cfg, get)...)
+	errs = append(errs, loadMedia(&cfg, get)...)
+
 	return cfg, errors.Join(errs...)
 }
 
@@ -224,4 +262,80 @@ func loadAuth(cfg *Config, get func(key, def string) string) []error {
 	}
 	cfg.Owner = &OwnerBootstrap{Name: name, Phone: e164, Password: password}
 	return errs
+}
+
+// loadPayments checks the payment provider settings.
+func loadPayments(cfg *Config, get func(key, def string) string) []error {
+	switch cfg.PaymentProvider {
+	case "":
+		return nil
+	case "fake":
+		// The fake provider says yes to every payment without moving money, so in
+		// production it would hand out goods for free.
+		if cfg.IsProduction() {
+			return []error{errors.New("PAYMENT_PROVIDER=fake is not allowed in production")}
+		}
+		secret := get("FAKE_PAYMENT_WEBHOOK_SECRET", "")
+		if len(secret) < 32 {
+			return []error{errors.New("FAKE_PAYMENT_WEBHOOK_SECRET must be at least 32 bytes when PAYMENT_PROVIDER=fake")}
+		}
+		cfg.FakePaymentWebhookSecret = []byte(secret)
+		return nil
+	default:
+		// TODO(open): paystack or hubtel (BRIEF §8).
+		return []error{fmt.Errorf("PAYMENT_PROVIDER must be fake or empty, got %q", cfg.PaymentProvider)}
+	}
+}
+
+// loadMedia checks the media storage settings.
+func loadMedia(cfg *Config, get func(key, def string) string) []error {
+	cfg.MediaStore = get("MEDIA_STORE", "")
+	switch cfg.MediaStore {
+	case "":
+		return nil
+	case "local":
+		// The production container's file system is read-only, and a folder on one VM is
+		// neither backed up nor served by a CDN.
+		if cfg.IsProduction() {
+			return []error{errors.New("MEDIA_STORE=local is not allowed in production; use s3")}
+		}
+		cfg.MediaLocalDir = get("MEDIA_LOCAL_DIR", "var/media")
+		cfg.MediaPublicBaseURL = get("MEDIA_PUBLIC_BASE_URL", "http://localhost:8080/media")
+		return nil
+	case "s3":
+		cfg.MediaPublicBaseURL = get("MEDIA_PUBLIC_BASE_URL", "")
+		cfg.MediaS3 = MediaS3{
+			Endpoint:        strings.TrimRight(get("MEDIA_S3_ENDPOINT", ""), "/"),
+			Region:          get("MEDIA_S3_REGION", ""),
+			Bucket:          get("MEDIA_S3_BUCKET", ""),
+			OriginalsBucket: get("MEDIA_S3_ORIGINALS_BUCKET", ""),
+			AccessKeyID:     get("MEDIA_S3_ACCESS_KEY_ID", ""),
+			SecretAccessKey: get("MEDIA_S3_SECRET_ACCESS_KEY", ""),
+		}
+		var errs []error
+		m := cfg.MediaS3
+		for key, v := range map[string]string{
+			"MEDIA_S3_ENDPOINT": m.Endpoint, "MEDIA_S3_REGION": m.Region, "MEDIA_S3_BUCKET": m.Bucket,
+			"MEDIA_S3_ACCESS_KEY_ID": m.AccessKeyID, "MEDIA_S3_SECRET_ACCESS_KEY": m.SecretAccessKey,
+			"MEDIA_PUBLIC_BASE_URL": cfg.MediaPublicBaseURL,
+		} {
+			if v == "" {
+				errs = append(errs, fmt.Errorf("%s is required when MEDIA_STORE=s3", key))
+			}
+		}
+		if m.OriginalsBucket != "" && m.OriginalsBucket == m.Bucket {
+			// The public bucket is readable by anyone, and originals can hold GPS locations.
+			errs = append(errs, errors.New("MEDIA_S3_ORIGINALS_BUCKET must be a different, private bucket"))
+		}
+		if cfg.IsProduction() {
+			for key, v := range map[string]string{"MEDIA_S3_ENDPOINT": m.Endpoint, "MEDIA_PUBLIC_BASE_URL": cfg.MediaPublicBaseURL} {
+				if v != "" && !strings.HasPrefix(v, "https://") {
+					errs = append(errs, fmt.Errorf("%s must use https:// in production", key))
+				}
+			}
+		}
+		return errs
+	default:
+		return []error{fmt.Errorf("MEDIA_STORE must be s3, local or empty, got %q", cfg.MediaStore)}
+	}
 }
