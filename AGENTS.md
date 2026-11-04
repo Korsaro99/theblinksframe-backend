@@ -45,7 +45,8 @@ This repo is the REST API for The Blinks storefront and admin back office (sungl
 - **Shared business rules**, which you call but don't change:
   - `catalog.PriceBand`, `PriceBandRange`, `StockStatus` and `Slugify`;
   - `catalog.ThisMonth` and `Last30Days`;
-  - `Store.ProductSales`, the only place that decides which orders count as sales.
+  - `Store.ProductSales`, the only place that decides which orders count as sales;
+  - `delivery.Fee`, the only place that prices delivery (zone fee, free from the zone's threshold).
 - **Tests:**
   - Acceptance tests drive the real router and a real Postgres. See `internal/httpapi/admin_brands_integration_test.go`, `apitest_integration_test.go` (the `api.owner().get(...)` harness) and `fixtures_integration_test.go`.
   - Table-driven unit tests for pure functions.
@@ -121,7 +122,7 @@ internal/
   auth/            staff users, JWT, refresh-token rotation, CSRF, rate limits, Casbin
   catalog/         brands, products, colours, media, price bands, menu counts, sales figures
   delivery/        delivery zones and riders (cart quote: later)
-  orders/          order detail, state machine, transitions, undo, stock; (M4/M5) creation, manual WhatsApp and shop orders
+  orders/          order detail, state machine, transitions, undo, stock, manual orders, confirm-payment; (M4) website orders
   payments/        (M4) Provider interface; paystack/, hubtel/, fake/; webhooks
   notify/          (M5) outbox, WhatsApp and SMS senders, templates from settings
   analytics/       (M6) dashboard queries, rankings, brand table, insights, xlsx export
@@ -161,7 +162,8 @@ Packages marked with a milestone don't exist yet: they are created when their mi
   - writes an `OrderEvent` (undos point at the event they reverse);
   - adjusts stock: down when the order enters a status that holds stock (`HoldsStock`: PAID onwards), back up when it leaves them (`→ CANCELLED`, or an undo); `order_items.stock_deducted` records what was taken;
   - adds the customer notification to an **outbox** table, sent after commit (TODO(M5): not built yet).
-  - Payment code (M4) moves orders to PAID through a new `orders.Store` method that calls `move()`, never by writing the status itself.
+  - Payments go through `payManually` (`internal/orders/payments.go`), which records the payment and calls `move()`; the provider webhook (M4) will add its own `orders.Store` method the same way, never writing the status itself.
+- **Manual orders** (`orders.Store.CreateManual`) start as AWAITING_PAYMENT; with a payment they move to PAID in the same transaction, and a paid SHOP pickup on to DELIVERED (handed over at the counter). `Idempotency-Key` is claimed in that transaction (`claimKey`).
 - **Stock never goes negative.** Use `UPDATE … SET stock = stock - $1 WHERE id = $2 AND stock >= $1`. If that fails for a paid order, flag the order for the owner instead of losing the payment.
 - **Order items** snapshot the product name, brand name, unit price (charged) and list price (catalogue). Only manual (WhatsApp and shop) orders may set the unit price; website orders always charge the catalogue price.
 - **Database constraints are the last line of defence:** `CHECK (stock >= 0)`, totals that must add up, delivery fields required for DELIVERY, and others. Map constraint violations to clear problem responses rather than 500s.
@@ -208,7 +210,7 @@ Packages marked with a milestone don't exist yet: they are created when their mi
 1. **Skeleton:** done (M1).
 2. **OpenAPI spec:** v0.2.0.
 3. **Auth and catalogue (M2):** staff auth done; brand CRUD done (reference example); admin products, the public catalogue and the seed done (task cards T01, T03–T09); media waits on the storage decision.
-4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; cart quote; order creation; manual WhatsApp and shop orders.
+4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; manual WhatsApp and shop orders and confirm-payment done; cart quote; website order creation.
 5. **Payments:** the interface plus the `fake` provider; then the chosen provider in sandbox; webhooks plus verify; auto-cancel job.
 6. **Notifications:** outbox and senders.
 7. **Analytics:** summary, revenue series (monthly and yearly), best sellers, ranking, brand table; xlsx export.

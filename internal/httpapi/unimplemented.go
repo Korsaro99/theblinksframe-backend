@@ -18,15 +18,9 @@ func notImplemented(c *gin.Context) {
 
 func (unimplemented) AdminListOrders(c *gin.Context, _ gen.AdminListOrdersParams) { notImplemented(c) }
 
-func (unimplemented) AdminCreateOrder(c *gin.Context, _ gen.AdminCreateOrderParams) {
-	notImplemented(c)
-}
-
 func (unimplemented) AdminGetOrderPipeline(c *gin.Context) { notImplemented(c) }
 
 func (unimplemented) AdminPatchOrder(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
-
-func (unimplemented) AdminConfirmPayment(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
 
 func (unimplemented) QuoteCart(c *gin.Context) { notImplemented(c) }
 

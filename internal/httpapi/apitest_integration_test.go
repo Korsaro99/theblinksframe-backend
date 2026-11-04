@@ -135,8 +135,17 @@ func (c *client) put(path string, body any) *response   { return c.do(http.Metho
 func (c *client) patch(path string, body any) *response { return c.do(http.MethodPatch, path, body) }
 func (c *client) delete(path string) *response          { return c.do(http.MethodDelete, path, nil) }
 
+// postWithKey sends a POST with an Idempotency-Key header.
+func (c *client) postWithKey(path string, body any, key string) *response {
+	return c.doWithHeaders(http.MethodPost, path, body, map[string]string{"Idempotency-Key": key})
+}
+
 // do sends a request. body is encoded as JSON unless it is nil or already a string.
 func (c *client) do(method, path string, body any) *response {
+	return c.doWithHeaders(method, path, body, nil)
+}
+
+func (c *client) doWithHeaders(method, path string, body any, headers map[string]string) *response {
 	c.api.t.Helper()
 	var r io.Reader
 	switch b := body.(type) {
@@ -153,6 +162,9 @@ func (c *client) do(method, path string, body any) *response {
 	req := httptest.NewRequest(method, path, r)
 	if r != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 	if c.csrf != "" && method != http.MethodGet {
 		req.Header.Set(csrfHeader, c.csrf)

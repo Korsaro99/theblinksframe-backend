@@ -103,16 +103,17 @@ func undoTarget(events []Event, current Status) (Event, error) {
 
 // lockedOrder is what a move needs to know about the order it changes.
 type lockedOrder struct {
-	ID         uuid.UUID
-	Status     Status
-	Fulfilment Fulfilment
+	ID           uuid.UUID
+	Status       Status
+	Fulfilment   Fulfilment
+	TotalPesewas int64
 }
 
 // lockOrder reads the order and locks its row until the transaction ends. Concurrent moves
 // on the same order therefore run one after the other, each seeing the last one's result.
 func lockOrder(tx *gorm.DB, id uuid.UUID) (lockedOrder, error) {
 	var rows []lockedOrder
-	if err := tx.Raw(`SELECT id, status, fulfilment FROM orders WHERE id = ? FOR UPDATE`, id).Scan(&rows).Error; err != nil {
+	if err := tx.Raw(`SELECT id, status, fulfilment, total_pesewas FROM orders WHERE id = ? FOR UPDATE`, id).Scan(&rows).Error; err != nil {
 		return lockedOrder{}, fmt.Errorf("lock order: %w", err)
 	}
 	if len(rows) == 0 {

@@ -56,6 +56,72 @@ func (s *Server) AdminUndoOrderTransition(c *gin.Context, orderID gen.OrderId) {
 	c.JSON(http.StatusOK, s.toGenAdminOrder(c, o))
 }
 
+// AdminCreateOrder implements POST /admin/orders: a WhatsApp order or a shop sale.
+func (s *Server) AdminCreateOrder(c *gin.Context, params gen.AdminCreateOrderParams) {
+	var req gen.AdminCreateOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "BAD_REQUEST", "The request is not in the expected format.")
+		return
+	}
+	p, _ := PrincipalFrom(c)
+	in := fromGenManualOrder(req)
+	in.ActorID = p.Staff.ID
+	if params.IdempotencyKey != nil {
+		in.IdempotencyKey = *params.IdempotencyKey
+	}
+	o, err := s.orders.CreateManual(c.Request.Context(), in)
+	if err != nil {
+		s.writeOrderError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, s.toGenAdminOrder(c, o))
+}
+
+// AdminConfirmPayment implements POST /admin/orders/{orderId}/confirm-payment.
+func (s *Server) AdminConfirmPayment(c *gin.Context, orderID gen.OrderId) {
+	var req gen.ManualPayment
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "BAD_REQUEST", "The request is not in the expected format.")
+		return
+	}
+	p, _ := PrincipalFrom(c)
+	o, err := s.orders.ConfirmPayment(c.Request.Context(), orderID, fromGenManualPayment(req), p.Staff.ID)
+	if err != nil {
+		s.writeOrderError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, s.toGenAdminOrder(c, o))
+}
+
+func fromGenManualOrder(in gen.AdminCreateOrderRequest) orders.ManualOrder {
+	out := orders.ManualOrder{
+		Source:         string(in.Source),
+		CustomerName:   in.Customer.Name,
+		CustomerPhone:  in.Customer.Phone,
+		Items:          make([]orders.ManualItem, len(in.Items)),
+		Fulfilment:     orders.Fulfilment(in.Fulfilment),
+		DeliveryZoneID: in.DeliveryZoneId,
+		PrivateNote:    in.PrivateNote,
+	}
+	for i, it := range in.Items {
+		out.Items[i] = orders.ManualItem{
+			ProductID: it.ProductId, Quantity: it.Quantity, ColorName: it.ColorName, UnitPricePesewas: it.UnitPricePesewas,
+		}
+	}
+	if a := in.Address; a != nil {
+		out.Address = &orders.Address{Area: a.Area, Landmark: a.Landmark, AddressLine: a.AddressLine, GhanaPostGPS: a.GhanaPostGps}
+	}
+	if in.Payment != nil {
+		pay := fromGenManualPayment(*in.Payment)
+		out.Payment = &pay
+	}
+	return out
+}
+
+func fromGenManualPayment(in gen.ManualPayment) orders.ManualPayment {
+	return orders.ManualPayment{Network: string(in.Network), Reference: in.Reference}
+}
+
 // writeOrderError answers an orders.Store error with the right problem response.
 func (s *Server) writeOrderError(c *gin.Context, err error) {
 	switch {
@@ -69,6 +135,12 @@ func (s *Server) writeOrderError(c *gin.Context, err error) {
 			"A payment can't be undone. Cancel the order instead.")
 	case errors.Is(err, orders.ErrNothingToUndo):
 		WriteProblem(c, http.StatusConflict, "NOTHING_TO_UNDO", "There is no step to undo.")
+	case errors.Is(err, orders.ErrOrderNotPayable):
+		WriteProblem(c, http.StatusConflict, "ORDER_NOT_PAYABLE",
+			"This order is not waiting for payment. It may already be paid or cancelled; reload it.")
+	case errors.Is(err, orders.ErrDuplicatePaymentReference):
+		WriteProblem(c, http.StatusConflict, "DUPLICATE_PAYMENT_REFERENCE",
+			"That transaction ID is already recorded for a payment. Check it against the MoMo message.")
 	default:
 		s.writeCatalogError(c, err) // validation errors, and the 500 for anything else
 	}

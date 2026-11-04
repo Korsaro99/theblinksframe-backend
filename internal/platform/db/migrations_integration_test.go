@@ -13,7 +13,7 @@ import (
 	"theblinksframe-backend/internal/platform/db/dbtest"
 )
 
-const nChanges = 18 // changesets in db/changelog; update when adding migrations
+const nChanges = 19 // changesets in db/changelog; update when adding migrations
 
 // TestMigrations applies every Liquibase changeset to a fresh Postgres, checks that the
 // schema enforces the business rules it is meant to, then rolls everything back and

@@ -230,7 +230,8 @@ func TestAdminRoutesNeedLogin(t *testing.T) {
 		{"staff may read orders", models.RoleStaff, request{method: "GET", path: "/api/v1/admin/orders", cookies: logged}, 501, "NOT_IMPLEMENTED"},
 		// The owner's undo itself is tested against a database in TestAdminUndo. Here, a
 		// mutating route that is still a stub shows the owner gets past role and CSRF checks.
-		{"owner may confirm a payment", models.RoleOwner, request{method: "POST", path: "/api/v1/admin/orders/" + uuid.NewString() + "/confirm-payment", body: `{"network":"CASH"}`, cookies: logged, csrf: csrf}, 501, "NOT_IMPLEMENTED"},
+		// Move it to another stub when this one is implemented.
+		{"owner may edit an order note", models.RoleOwner, request{method: "PATCH", path: "/api/v1/admin/orders/" + uuid.NewString(), body: `{"privateNote":"Call first"}`, cookies: logged, csrf: csrf}, 501, "NOT_IMPLEMENTED"},
 		// Probe a public route that is still a stub, so the test needs no database. Move it
 		// to another stub when this one is implemented.
 		{"public route needs no login", "", request{method: "GET", path: "/api/v1/orders/" + uuid.NewString() + "/payment"}, 501, "NOT_IMPLEMENTED"},
