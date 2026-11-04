@@ -17,6 +17,7 @@ import (
 	"theblinksframe-backend/internal/config"
 	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi"
+	"theblinksframe-backend/internal/media"
 	"theblinksframe-backend/internal/orders"
 	"theblinksframe-backend/internal/payments"
 	"theblinksframe-backend/internal/payments/fake"
@@ -62,6 +63,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	store, mediaDir, err := mediaStorage(cfg, log)
+	if err != nil {
+		return err
+	}
 	provider := paymentProvider(cfg, log)
 	orderStore := orders.NewStore(gdb, provider)
 	go housekeep(ctx, orderStore, cfg.HousekeepingInterval, log)
@@ -79,6 +84,8 @@ func run() error {
 		Catalog:            catalog.NewStore(gdb, nil),
 		Delivery:           delivery.NewStore(gdb),
 		Orders:             orderStore,
+		Media:              media.NewLibrary(gdb, store, log),
+		MediaDir:           mediaDir,
 		Payments:           provider,
 	})
 	if err != nil {
@@ -132,6 +139,33 @@ func bootstrapOwner(ctx context.Context, cfg config.Config, svc *auth.Service, l
 		log.Warn("an OWNER account already exists, so OWNER_BOOTSTRAP_* was ignored; remove OWNER_BOOTSTRAP_PASSWORD from the environment")
 	}
 	return nil
+}
+
+// mediaStorage returns where uploads are kept, or nil when uploads are off. For local storage
+// it also returns the folder the API serves at /media.
+func mediaStorage(cfg config.Config, log *slog.Logger) (media.Storage, string, error) {
+	switch cfg.MediaStore {
+	case "s3":
+		s, err := media.NewS3(media.S3Config{
+			Endpoint: cfg.MediaS3.Endpoint, Region: cfg.MediaS3.Region,
+			AccessKeyID: cfg.MediaS3.AccessKeyID, SecretAccessKey: cfg.MediaS3.SecretAccessKey,
+			Bucket: cfg.MediaS3.Bucket, OriginalsBucket: cfg.MediaS3.OriginalsBucket,
+			PublicBaseURL: cfg.MediaPublicBaseURL,
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		log.Info("media uploads go to S3-compatible storage", slog.String("bucket", cfg.MediaS3.Bucket),
+			slog.Bool("keepsOriginals", cfg.MediaS3.OriginalsBucket != ""))
+		return s, "", nil
+	case "local":
+		l := media.NewLocal(cfg.MediaLocalDir, cfg.MediaPublicBaseURL)
+		log.Info("media uploads go to a local folder (development)", slog.String("dir", cfg.MediaLocalDir))
+		return l, l.PublicDir(), nil
+	default:
+		log.Info("media uploads are off (MEDIA_STORE is empty)")
+		return nil, "", nil
+	}
 }
 
 // paymentProvider returns the configured provider, or nil when online payments are off.

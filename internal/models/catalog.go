@@ -1,6 +1,9 @@
 package models
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,10 +61,55 @@ type ProductMedia struct {
 	ProductID uuid.UUID `gorm:"type:uuid"`
 	Type      string    // PHOTO or VIDEO
 	Role      string    // COVER, WORN, SIDE or OTHER
-	URL       string    `gorm:"column:url"`
+	URL       string    `gorm:"column:url"` // the largest photo variant, or the video file
 	Width     int
 	Height    int
 	Position  int
+	// Variants are a photo's resized copies, smallest first; empty for videos and for
+	// media added by hand.
+	Variants MediaVariants `gorm:"type:jsonb"`
+	// StoragePrefix is where the files live in the media bucket; nil for media added by
+	// hand (the seed), whose files are not ours to delete.
+	StoragePrefix *string
+	ContentType   *string
+	SizeBytes     *int64
+	CreatedAt     time.Time
+}
+
+// MediaVariant is one resized copy of a photo.
+type MediaVariant struct {
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	URL    string `json:"url"`
+}
+
+// MediaVariants is the product_media.variants jsonb column.
+type MediaVariants []MediaVariant
+
+// Scan reads the jsonb array.
+func (v *MediaVariants) Scan(src any) error {
+	var b []byte
+	switch s := src.(type) {
+	case []byte:
+		b = s
+	case string:
+		b = []byte(s)
+	case nil:
+		*v = MediaVariants{}
+		return nil
+	default:
+		return fmt.Errorf("media variants: unexpected %T", src)
+	}
+	return json.Unmarshal(b, v)
+}
+
+// Value writes the array as JSON, [] when empty.
+func (v MediaVariants) Value() (driver.Value, error) {
+	if v == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(v)
+	return string(b), err
 }
 
 // TableName keeps GORM from pluralising "media" to "product_medias".

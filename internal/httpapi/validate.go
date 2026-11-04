@@ -44,9 +44,6 @@ func openAPIValidator(spec *openapi3.T, authenticate openapi3filter.Authenticati
 		return nil, fmt.Errorf("openapi router: %w", err)
 	}
 	return func(c *gin.Context) {
-		if c.Request.Body != nil {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxJSONBody)
-		}
 		route, pathParams, err := router.FindRoute(c.Request)
 		if err != nil {
 			// gin matched a route that the spec does not have: the code and spec disagree.
@@ -57,14 +54,30 @@ func openAPIValidator(spec *openapi3.T, authenticate openapi3filter.Authenticati
 			WriteProblem(c, http.StatusNotFound, "NOT_FOUND", "There is nothing at this address.")
 			return
 		}
+		upload := uploadLimit(route.Operation)
+		if c.Request.Body != nil {
+			limit := int64(maxJSONBody)
+			if upload > 0 {
+				limit = upload
+			}
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+		}
 		ctx := context.WithValue(c.Request.Context(), ginContextKey{}, c)
 
 		security := route.Operation.Security
 		if security == nil {
 			security = &route.Spec.Security
 		}
+		// kin-openapi reads the whole body into memory before checking security. For uploads,
+		// give it a copy without one: the caller must be known to be allowed before the
+		// server reads 50 MB from them. (authenticate reads cookies and headers through gin.)
+		authReq := c.Request
+		if upload > 0 {
+			authReq = c.Request.Clone(c.Request.Context())
+			authReq.Body, authReq.GetBody = http.NoBody, nil
+		}
 		authInput := &openapi3filter.RequestValidationInput{
-			Request: c.Request, PathParams: pathParams, Route: route,
+			Request: authReq, PathParams: pathParams, Route: route,
 			Options: &openapi3filter.Options{AuthenticationFunc: authenticate},
 		}
 		if err := openapi3filter.ValidateSecurityRequirements(ctx, authInput, *security); err != nil {
@@ -77,6 +90,9 @@ func openAPIValidator(spec *openapi3.T, authenticate openapi3filter.Authenticati
 			Options: &openapi3filter.Options{
 				AuthenticationFunc: openapi3filter.NoopAuthenticationFunc, // done above
 				MultiError:         true,                                  // report every bad field at once
+				// An upload's body is a file, which kin-openapi would read into memory to
+				// "validate"; the handler streams and checks it itself.
+				ExcludeRequestBody: upload > 0,
 			},
 		}
 		if err := openapi3filter.ValidateRequest(ctx, input); err != nil {
@@ -85,6 +101,20 @@ func openAPIValidator(spec *openapi3.T, authenticate openapi3filter.Authenticati
 		}
 		c.Next()
 	}, nil
+}
+
+// uploadLimit is an operation's x-upload-max-bytes, or 0 when it takes an ordinary JSON body.
+// File uploads are the only bodies allowed past maxJSONBody, and only up to their own limit.
+func uploadLimit(op *openapi3.Operation) int64 {
+	switch v := op.Extensions["x-upload-max-bytes"].(type) {
+	case float64:
+		return int64(v)
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	}
+	return 0
 }
 
 // authProblemKey holds the problem an authentication check chose, so the response can say

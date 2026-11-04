@@ -334,6 +334,69 @@ changeset or its rollback. A variable set on the command line wins over `.env`:
 After changing `compose.yaml`, `cloudflared/config.yml` or `.env`, run `sudo docker compose up -d`
 (a changed `config.yml` alone needs `sudo docker compose restart tunnel`).
 
+## Media (photos and videos)
+
+Uploads go through the API, which checks each file, resizes photos and strips their metadata,
+then stores them in Oracle Object Storage (DECIDED 2026-11-04):
+
+- **`blinks-media`**, public-read: the 400/800/1600 px photos and the videos customers load.
+  Anyone with a file's URL can see it, which is the point; nothing private goes in it.
+- **`blinks-media-originals`**, private: each photo as it was uploaded, kept so new sizes can be
+  made later. Phone photos can hold the GPS location where they were taken, so this bucket is
+  never public.
+
+Both count against the 20 GB of Always Free storage, shared with the backups. A product can
+have up to 12 photos and videos, of at most 15 MB and 50 MB; a hundred products with a few
+photos each is well under 1 GB, but many videos add up quickly.
+
+**Set up (once), in the Oracle Cloud console**, in your home region (where the VM is):
+
+1. **Storage → Buckets → Create bucket** `blinks-media`, Standard tier, no versioning. On its
+   page, **Edit visibility → Public**, and **untick "Allow users to list objects"**: people can
+   load a file whose URL they have, but can't list the bucket. Note the **Namespace**.
+2. **Create bucket** `blinks-media-originals` the same way, and leave it **Private**.
+3. **Identity → Domains → Default → Groups → Create group** `blinks-media`, and a user
+   `blinks-media` in it (no console password). **Policies** (root compartment) **→ Create
+   policy** `blinks-media`, with:
+
+   ```text
+   Allow group 'Default'/'blinks-media' to read buckets in tenancy where any {target.bucket.name = 'blinks-media', target.bucket.name = 'blinks-media-originals'}
+   Allow group 'Default'/'blinks-media' to manage objects in tenancy where any {target.bucket.name = 'blinks-media', target.bucket.name = 'blinks-media-originals'}
+   ```
+
+   The API needs to add, read, list and delete files, and nothing else: this key can't touch
+   the backups bucket or anything outside these two.
+4. On the user's page, **Customer secret keys → Generate secret key**, named `api-media`. Copy
+   the secret now (it is shown once) and the access key.
+
+Then add the settings to `.env` without them showing on screen:
+
+```bash
+cd ~/the-blinks/prod && read -r -p 'Namespace: ' ns && read -r -p 'Region (e.g. eu-frankfurt-1): ' rg && read -r -p 'Access key: ' kid && read -rs -p 'Secret key: ' sec && echo && (umask 077; printf 'MEDIA_STORE=s3\nMEDIA_S3_ENDPOINT=https://%s.compat.objectstorage.%s.oraclecloud.com\nMEDIA_S3_REGION=%s\nMEDIA_S3_BUCKET=blinks-media\nMEDIA_S3_ORIGINALS_BUCKET=blinks-media-originals\nMEDIA_S3_ACCESS_KEY_ID=%s\nMEDIA_S3_SECRET_ACCESS_KEY=%s\nMEDIA_PUBLIC_BASE_URL=https://objectstorage.%s.oraclecloud.com/n/%s/b/blinks-media/o\n' "$ns" "$rg" "$rg" "$kid" "$sec" "$rg" "$ns" >> .env) && unset sec
+```
+
+```bash
+cd ~/the-blinks/prod && sudo docker compose up -d api && sudo docker compose logs api | grep -i media
+```
+
+It logs `media uploads go to S3-compatible storage`. **Check it once by hand** (the code is
+tested against an S3-compatible stand-in, not yet against Oracle): upload a photo in the admin,
+open its URL from the product page in a private browser window, and check the bucket shows
+`products/<id>/<id>/w400.jpg` and friends, and the originals bucket the `original`.
+
+Limits for now, while the VM is the 1 GB micro shape:
+
+- **Videos are stored as uploaded.** No conversion (ffmpeg would need more CPU and memory than
+  the VM has), so a HEVC video from a newer iPhone may not play on some Android phones: set the
+  iPhone camera to **Most Compatible** (Settings → Camera → Formats) before filming products.
+- **Media is served straight from Oracle**, not cached by Cloudflare. Fine for the trial; later,
+  a `media.theblinksframes.com` hostname through Cloudflare would cache it near customers and
+  only `MEDIA_PUBLIC_BASE_URL` would change (new uploads; older URLs keep working).
+
+| Media secret                 | How                                                                                       | Effect |
+| ---------------------------- | ----------------------------------------------------------------------------------------- | ------ |
+| `MEDIA_S3_SECRET_ACCESS_KEY` | Generate a new key on the user `blinks-media`, put both values in `.env`, `up -d api`, delete the old key | Uploads pause for the restart |
+
 ## Rotating secrets
 
 | Secret              | How                                                                                                         | Effect                                     |

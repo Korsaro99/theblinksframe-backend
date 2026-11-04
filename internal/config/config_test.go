@@ -131,6 +131,39 @@ func TestLoad(t *testing.T) {
 			wantErr: []string{"PAYMENT_PROVIDER must be fake or empty"},
 		},
 		{
+			name: "local media in development",
+			env:  map[string]string{"DATABASE_URL": "x", "MEDIA_STORE": "local"},
+			check: func(t *testing.T, c Config) {
+				if c.MediaLocalDir != "var/media" || c.MediaPublicBaseURL != "http://localhost:8080/media" {
+					t.Errorf("media = %q, %q", c.MediaLocalDir, c.MediaPublicBaseURL)
+				}
+			},
+		},
+		{
+			name: "production refuses local media",
+			env: map[string]string{
+				"DATABASE_URL": "x", "APP_ENV": "production", "CORS_ALLOWED_ORIGINS": "https://theblinks.example",
+				"MEDIA_STORE": "local",
+			},
+			wantErr: []string{"MEDIA_STORE=local is not allowed in production"},
+		},
+		{
+			name:    "s3 media needs its settings",
+			env:     map[string]string{"DATABASE_URL": "x", "MEDIA_STORE": "s3"},
+			wantErr: []string{"MEDIA_S3_ENDPOINT is required", "MEDIA_S3_BUCKET is required", "MEDIA_S3_SECRET_ACCESS_KEY is required", "MEDIA_PUBLIC_BASE_URL is required"},
+		},
+		{
+			name: "originals can't share the public bucket, and production needs https",
+			env: map[string]string{
+				"DATABASE_URL": "x", "APP_ENV": "production", "CORS_ALLOWED_ORIGINS": "https://theblinks.example",
+				"MEDIA_STORE": "s3", "MEDIA_S3_ENDPOINT": "http://ns.compat.objectstorage.eu-frankfurt-1.oraclecloud.com",
+				"MEDIA_S3_REGION": "eu-frankfurt-1", "MEDIA_S3_BUCKET": "blinks-media", "MEDIA_S3_ORIGINALS_BUCKET": "blinks-media",
+				"MEDIA_S3_ACCESS_KEY_ID": "id", "MEDIA_S3_SECRET_ACCESS_KEY": "secret",
+				"MEDIA_PUBLIC_BASE_URL": "https://objectstorage.eu-frankfurt-1.oraclecloud.com/n/ns/b/blinks-media/o",
+			},
+			wantErr: []string{"different, private bucket", "MEDIA_S3_ENDPOINT must use https://"},
+		},
+		{
 			name:    "jwt secret required",
 			env:     map[string]string{"DATABASE_URL": "x", "JWT_SECRET": ""},
 			wantErr: []string{"JWT_SECRET is required"},

@@ -15,6 +15,7 @@ import (
 	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi/gen"
+	"theblinksframe-backend/internal/media"
 	"theblinksframe-backend/internal/models"
 	"theblinksframe-backend/internal/orders"
 	"theblinksframe-backend/internal/payments"
@@ -49,6 +50,7 @@ type Server struct {
 	catalog  *catalog.Store
 	delivery *delivery.Store
 	orders   *orders.Store
+	media    *media.Library
 	payments payments.Provider // nil when online payments are off
 	auth     AuthService
 	authz    Authorizer

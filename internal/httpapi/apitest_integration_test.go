@@ -21,6 +21,7 @@ import (
 	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/delivery"
+	"theblinksframe-backend/internal/media"
 	"theblinksframe-backend/internal/models"
 	"theblinksframe-backend/internal/orders"
 	"theblinksframe-backend/internal/payments/fake"
@@ -58,6 +59,7 @@ type testAPI struct {
 	router *gin.Engine
 	orders *orders.Store  // for running Housekeep as the background job would
 	pay    *fake.Provider // the payment provider behind the router
+	files  *media.Memory  // where uploaded media go
 	seq    int            // makes fixture names unique
 }
 
@@ -78,6 +80,7 @@ func newAPIWith(t *testing.T, pay *fake.Provider) *testAPI {
 		t.Fatal(err)
 	}
 	store := orders.NewStore(testDB, pay)
+	files := media.NewMemory()
 	router, err := NewRouter(Deps{
 		Log:          log,
 		DB:           fakePinger{},
@@ -89,11 +92,12 @@ func newAPIWith(t *testing.T, pay *fake.Provider) *testAPI {
 		Delivery:     delivery.NewStore(testDB),
 		Orders:       store,
 		Payments:     pay,
+		Media:        media.NewLibrary(testDB, files, log),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &testAPI{t: t, db: testDB, router: router, orders: store, pay: pay}
+	return &testAPI{t: t, db: testDB, router: router, orders: store, pay: pay, files: files}
 }
 
 const testWebhookSecret = "integration-webhook-secret-32-bytes!!"

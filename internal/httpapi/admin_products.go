@@ -109,10 +109,18 @@ func (s *Server) AdminPatchProduct(c *gin.Context, productID openapi_types.UUID)
 
 // AdminDeleteProduct implements DELETE /admin/products/{productId}.
 func (s *Server) AdminDeleteProduct(c *gin.Context, productID openapi_types.UUID) {
+	// The media rows go with the product (ON DELETE CASCADE); their files in the bucket
+	// don't, so note where they are first and delete them afterwards.
+	files, err := s.media.ProductFiles(c.Request.Context(), productID)
+	if err != nil {
+		s.internalError(c, "list product media files", err)
+		return
+	}
 	if err := s.catalog.DeleteProduct(c.Request.Context(), productID); err != nil {
 		s.writeCatalogError(c, err)
 		return
 	}
+	s.media.DeleteFiles(files)
 	c.Status(http.StatusNoContent)
 }
 
@@ -181,14 +189,7 @@ func toGenAdminProduct(p catalog.AdminProduct) gen.AdminProduct {
 
 	media := make([]gen.Media, len(p.Media))
 	for i, m := range p.Media {
-		media[i] = gen.Media{
-			Id:     m.ID,
-			Type:   gen.MediaType(m.Type),
-			Role:   gen.MediaRole(m.Role),
-			Url:    m.URL,
-			Width:  m.Width,
-			Height: m.Height,
-		}
+		media[i] = toGenMedia(m)
 	}
 
 	return gen.AdminProduct{

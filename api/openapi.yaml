@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: The Blinks API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     REST API for The Blinks storefront and back office. This file is the contract between
     `theblinksframe-backend` and the Angular frontend: change it first, then regenerate both sides.
@@ -576,7 +576,7 @@ paths:
       operationId: adminCreateProduct
       summary: Add a product
       description: |
-        Photos are attached in M2 through the media endpoints. Publishing (`status: PUBLISHED`) requires
+        Photos are attached afterwards with `POST /admin/products/{productId}/media`. Publishing (`status: PUBLISHED`) requires
         a cover photo; otherwise 422 lists what is missing (the "Ready to publish?" checklist).
       security: [{ accessCookie: [], csrfHeader: [] }]
       requestBody:
@@ -677,6 +677,131 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: The product has orders (`code` PRODUCT_HAS_ORDERS).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /admin/products/{productId}/media:
+    parameters:
+      - name: productId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Admin catalogue]
+      operationId: adminUploadProductMedia
+      summary: Upload a photo or video (OWNER only)
+      description: |
+        Send the file itself as the body (not a form), with its type as Content-Type. The API checks
+        the real file type from its content, whatever the name or Content-Type say.
+
+        - Photos: JPEG, PNG or WebP, up to 15 MB and 24 megapixels, at least 400 px on the short side.
+          They are turned upright (phone rotation), re-encoded as JPEG without any metadata (so no
+          GPS location leaves the phone), and stored as 400, 800 and 1600 px wide `variants`.
+        - Videos: MP4 or MOV, up to 50 MB, stored as uploaded (no conversion yet). H.264 plays on every
+          phone; HEVC (the newer iPhone default) may not play on some Android phones.
+
+        `role` COVER makes it the cover; the previous cover becomes OTHER. A product has at most 12 media.
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      # Raises the 1 MiB body limit for this operation; the handler reads and checks the body itself.
+      x-upload-max-bytes: 52428800
+      parameters:
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/MediaRole' }
+          description: Defaults to OTHER.
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+          video/mp4: { schema: { type: string, format: binary } }
+          video/quicktime: { schema: { type: string, format: binary } }
+      responses:
+        '201':
+          description: Uploaded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Media' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The product already has 12 media (`code` MEDIA_LIMIT).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '413':
+          description: The file is too large (`code` TOO_LARGE).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: |
+            Not a photo or video we accept, or too small, too big in pixels, or unreadable
+            (`code` UNSUPPORTED_FILE, with a `detail` to show).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: |
+            Media storage is not set up, or another upload is being processed and this one waited
+            too long (`code` MEDIA_UNAVAILABLE). Try again.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /admin/products/{productId}/media/{mediaId}:
+    parameters:
+      - name: productId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: mediaId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [Admin catalogue]
+      operationId: adminPatchProductMedia
+      summary: Make a photo the cover, change its role, or move it (OWNER only)
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaPatch' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Media' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            The cover of a published product can't stop being the cover; make another photo the cover
+            instead (`code` COVER_REQUIRED). A video can't be the cover (`code` COVER_MUST_BE_PHOTO).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Admin catalogue]
+      operationId: adminDeleteProductMedia
+      summary: Delete a photo or video, and its files (OWNER only)
+      security: [{ accessCookie: [], csrfHeader: [] }]
+      responses:
+        '204':
+          description: Deleted.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: It is the cover of a published product (`code` COVER_REQUIRED). Upload or choose another cover first.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
@@ -1159,11 +1284,31 @@ components:
         id: { type: string, format: uuid }
         type: { $ref: '#/components/schemas/MediaType' }
         role: { $ref: '#/components/schemas/MediaRole' }
+        url: { type: string, format: uri, description: 'The largest photo variant, or the video file.' }
+        width: { type: integer }
+        height: { type: integer }
+        variants:
+          type: array
+          description: A photo's resized copies (400, 800 and 1600 px wide, smaller ones only), smallest first, for `srcset`. Empty for videos.
+          items: { $ref: '#/components/schemas/ImageVariant' }
+    MediaPatch:
+      type: object
+      minProperties: 1
+      properties:
+        role: { $ref: '#/components/schemas/MediaRole' }
+        position: { type: integer, minimum: 0, maximum: 100, description: 'Order on the product page, lowest first; the cover always comes first.' }
+    Image:
+      type: object
+      required: [url, width, height]
+      properties:
         url: { type: string, format: uri }
         width: { type: integer }
         height: { type: integer }
-        # Responsive sizes (400/800/1600 px) are added in M2 once the media storage is chosen.
-    Image:
+        variants:
+          type: array
+          description: Resized copies, smallest first, for `srcset`. Absent for images we didn't resize.
+          items: { $ref: '#/components/schemas/ImageVariant' }
+    ImageVariant:
       type: object
       required: [url, width, height]
       properties:

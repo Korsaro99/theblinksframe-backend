@@ -51,3 +51,6 @@ desktop.ini
 *~
 # Personal Claude Code settings; shared ones in .claude/settings.json stay tracked.
 .claude/settings.local.json
+
+# Local media uploads (MEDIA_STORE=local)
+/var/

@@ -84,7 +84,6 @@ None right now. The next cards wait for the strong-model steps below.
 
 | Future card | Waits for |
 |---|---|
-| Product media: list, reorder, delete, set cover | Media storage decision (Cloudinary or Oracle) and the upload endpoint, which is security-sensitive (strong model) |
 | Settings `GET/PUT /admin/settings` | Settings schema and spec (strong model) |
 | Delivery zone and rider admin CRUD | Spec for Settings screens (strong model) |
 | Admin order list and pipeline counts | Nothing: the state machine and order detail are done, so the card can be written (strong model) |

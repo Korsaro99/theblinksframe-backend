@@ -14,6 +14,7 @@ import (
 	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi/gen"
+	"theblinksframe-backend/internal/media"
 	"theblinksframe-backend/internal/orders"
 	"theblinksframe-backend/internal/payments"
 	"theblinksframe-backend/internal/platform/ratelimit"
@@ -37,6 +38,10 @@ type Deps struct {
 	Catalog  *catalog.Store
 	Delivery *delivery.Store
 	Orders   *orders.Store
+	Media    *media.Library
+	// MediaDir, when set, is a folder of uploaded media served at /media (development
+	// storage only; production serves media from the bucket).
+	MediaDir string
 	// Payments is the online payment provider, also given to Orders; nil turns payments off.
 	Payments payments.Provider
 }
@@ -81,8 +86,11 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	})
 
 	r.GET("/healthz", healthz(d.DB, d.Log))
+	if d.MediaDir != "" {
+		r.Static("/media", d.MediaDir)
+	}
 
-	srv := &Server{catalog: d.Catalog, delivery: d.Delivery, orders: d.Orders, payments: d.Payments, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log,
+	srv := &Server{catalog: d.Catalog, delivery: d.Delivery, orders: d.Orders, media: d.Media, payments: d.Payments, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log,
 		orderLimit: ratelimit.New(ordersPerIP, publicWindow, nil), payLimit: ratelimit.New(paysPerIP, publicWindow, nil)}
 	spec, err := gen.GetSwagger()
 	if err != nil {

@@ -86,7 +86,7 @@ func toGenProductSummary(p models.Product) gen.ProductSummary {
 	var cover *gen.Image
 	for _, media := range p.Media {
 		if media.Role == "COVER" {
-			cover = &gen.Image{Url: media.URL, Width: media.Width, Height: media.Height}
+			cover = &gen.Image{Url: media.URL, Width: media.Width, Height: media.Height, Variants: toGenVariants(media.Variants)}
 			break
 		}
 	}
@@ -115,14 +115,7 @@ func toGenProductDetail(p models.Product) gen.ProductDetail {
 	summary := toGenProductSummary(p)
 	media := make([]gen.Media, len(p.Media))
 	for i, m := range p.Media {
-		media[i] = gen.Media{
-			Id:     m.ID,
-			Type:   gen.MediaType(m.Type),
-			Role:   gen.MediaRole(m.Role),
-			Url:    m.URL,
-			Width:  m.Width,
-			Height: m.Height,
-		}
+		media[i] = toGenMedia(m)
 	}
 	return gen.ProductDetail{
 		Id:           summary.Id,
