@@ -234,7 +234,7 @@ func TestAdminRoutesNeedLogin(t *testing.T) {
 		{"owner may edit an order note", models.RoleOwner, request{method: "PATCH", path: "/api/v1/admin/orders/" + uuid.NewString(), body: `{"privateNote":"Call first"}`, cookies: logged, csrf: csrf}, 501, "NOT_IMPLEMENTED"},
 		// Probe a public route that is still a stub, so the test needs no database. Move it
 		// to another stub when this one is implemented.
-		{"public route needs no login", "", request{method: "GET", path: "/api/v1/orders/" + uuid.NewString() + "/payment"}, 501, "NOT_IMPLEMENTED"},
+		{"public route needs no login", "", request{method: "POST", path: "/api/v1/cart/quote", body: `{"items":[{"productId":"` + uuid.NewString() + `","quantity":1}],"fulfilment":"PICKUP"}`}, 501, "NOT_IMPLEMENTED"},
 		{"order tracking route exists", "", request{method: "POST", path: "/api/v1/orders/track", body: `{"number":1091,"phone":"0241234567"}`}, 501, "NOT_IMPLEMENTED"},
 		{"bad path parameter", models.RoleOwner, request{method: "GET", path: "/api/v1/admin/orders/not-a-uuid", cookies: logged}, 400, "BAD_REQUEST"},
 		{"body too large", "", request{method: "POST", path: "/api/v1/auth/login", body: `{"login":"` + strings.Repeat("x", maxJSONBody) + `"}`}, 413, "TOO_LARGE"},

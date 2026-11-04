@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -124,6 +125,7 @@ func fromGenManualPayment(in gen.ManualPayment) orders.ManualPayment {
 
 // writeOrderError answers an orders.Store error with the right problem response.
 func (s *Server) writeOrderError(c *gin.Context, err error) {
+	var cart *orders.CartError
 	switch {
 	case errors.Is(err, orders.ErrNotFound):
 		WriteProblem(c, http.StatusNotFound, "NOT_FOUND", "We couldn't find that order.")
@@ -141,6 +143,24 @@ func (s *Server) writeOrderError(c *gin.Context, err error) {
 	case errors.Is(err, orders.ErrDuplicatePaymentReference):
 		WriteProblem(c, http.StatusConflict, "DUPLICATE_PAYMENT_REFERENCE",
 			"That transaction ID is already recorded for a payment. Check it against the MoMo message.")
+	case errors.As(err, &cart):
+		code, detail := "OUT_OF_STOCK", "Some items don't have enough stock left. Check your bag and try again."
+		if errors.Is(err, orders.ErrProductUnavailable) {
+			code, detail = "PRODUCT_UNAVAILABLE", "Some items are no longer on sale. Check your bag and try again."
+		}
+		fields := make([]FieldProblem, len(cart.Lines))
+		for i, l := range cart.Lines {
+			fields[i] = FieldProblem{Field: l.Field, Message: l.Message}
+		}
+		WriteProblem(c, http.StatusConflict, code, detail, fields...)
+	case errors.Is(err, orders.ErrTooManyAttempts):
+		WriteProblem(c, http.StatusTooManyRequests, "TOO_MANY_ATTEMPTS",
+			"This order has had too many payment attempts. Please message us on WhatsApp to pay.")
+	case errors.Is(err, orders.ErrPaymentsOff), errors.Is(err, orders.ErrProviderUnavailable):
+		s.log.WarnContext(c.Request.Context(), "payment provider unavailable",
+			slog.String("requestId", RequestIDFrom(c)), slog.Any("error", err))
+		WriteProblem(c, http.StatusBadGateway, "PROVIDER_ERROR",
+			"We couldn't start the mobile money payment. Please try again, or order on WhatsApp.")
 	default:
 		s.writeCatalogError(c, err) // validation errors, and the 500 for anything else
 	}
@@ -188,11 +208,7 @@ func (s *Server) toGenAdminOrder(c *gin.Context, o orders.Order) gen.AdminOrder 
 		out.Rider = &r
 	}
 	for i, it := range o.Items {
-		out.Items[i] = gen.OrderItem{
-			ProductId: it.ProductID, ModelName: it.ModelName, BrandName: it.BrandName, ColorName: it.ColorName,
-			Quantity: it.Quantity, UnitPricePesewas: it.UnitPricePesewas, ListPricePesewas: it.ListPricePesewas,
-			LineTotalPesewas: it.LineTotalPesewas,
-		}
+		out.Items[i] = toGenOrderItem(it)
 	}
 	for i, p := range o.Payments {
 		out.Payments[i] = gen.Payment{
@@ -216,6 +232,14 @@ func (s *Server) toGenAdminOrder(c *gin.Context, o orders.Order) gen.AdminOrder 
 		out.Events[i] = ev
 	}
 	return out
+}
+
+func toGenOrderItem(it orders.Item) gen.OrderItem {
+	return gen.OrderItem{
+		ProductId: it.ProductID, ModelName: it.ModelName, BrandName: it.BrandName, ColorName: it.ColorName,
+		Quantity: it.Quantity, UnitPricePesewas: it.UnitPricePesewas, ListPricePesewas: it.ListPricePesewas,
+		LineTotalPesewas: it.LineTotalPesewas,
+	}
 }
 
 func toGenStatuses(in []orders.Status) []gen.OrderStatus {

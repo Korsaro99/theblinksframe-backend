@@ -17,6 +17,8 @@ import (
 	"theblinksframe-backend/internal/httpapi/gen"
 	"theblinksframe-backend/internal/models"
 	"theblinksframe-backend/internal/orders"
+	"theblinksframe-backend/internal/payments"
+	"theblinksframe-backend/internal/platform/ratelimit"
 )
 
 // AuthService is what the HTTP layer needs from internal/auth. It is an interface so that
@@ -47,11 +49,16 @@ type Server struct {
 	catalog  *catalog.Store
 	delivery *delivery.Store
 	orders   *orders.Store
+	payments payments.Provider // nil when online payments are off
 	auth     AuthService
 	authz    Authorizer
 	limiter  LoginLimiter
 	cookies  CookieOptions
 	log      *slog.Logger
+
+	// Per-IP limits on the public endpoints that cost something.
+	orderLimit *ratelimit.Window
+	payLimit   *ratelimit.Window
 }
 
 var _ gen.ServerInterface = (*Server)(nil)

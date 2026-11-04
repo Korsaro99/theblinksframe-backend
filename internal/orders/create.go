@@ -58,7 +58,47 @@ type Address struct {
 	GhanaPostGPS *string
 }
 
-const scopeAdminCreateOrder = "ADMIN_CREATE_ORDER"
+// WebsiteOrder is an order placed on the website (POST /orders). Prices always come from
+// the catalogue, and only published, visible products in stock can be bought.
+type WebsiteOrder struct {
+	CustomerName   string
+	CustomerPhone  string
+	Items          []CartItem
+	Fulfilment     Fulfilment
+	DeliveryZoneID *uuid.UUID
+	Address        *Address
+	IdempotencyKey string
+}
+
+// CartItem is one line of a website order.
+type CartItem struct {
+	ProductID uuid.UUID
+	Quantity  int
+	ColorName *string
+}
+
+var (
+	// ErrOutOfStock means a line asks for more than is in stock (stock is not reserved, so
+	// this is checked when the order is placed).
+	ErrOutOfStock = errors.New("not enough stock")
+	// ErrProductUnavailable means a product doesn't exist or is no longer on sale. Both get
+	// the same answer, so drafts stay secret.
+	ErrProductUnavailable = errors.New("product not on sale")
+)
+
+// CartError says which cart lines can't be bought. errors.Is matches Err.
+type CartError struct {
+	Err   error
+	Lines []catalog.FieldError
+}
+
+func (e *CartError) Error() string { return e.Err.Error() }
+func (e *CartError) Unwrap() error { return e.Err }
+
+const (
+	scopeAdminCreateOrder = "ADMIN_CREATE_ORDER"
+	scopeCreateOrder      = "CREATE_ORDER"
+)
 
 // errReplayed rolls back a request whose Idempotency-Key was already used for the same order.
 type errReplayed struct{ orderID uuid.UUID }
@@ -71,6 +111,30 @@ func (e errReplayed) Error() string { return "idempotent replay of order " + e.o
 // recorded as handed over (DELIVERED). Repeating a request with the same IdempotencyKey
 // returns the first order.
 func (s *Store) CreateManual(ctx context.Context, in ManualOrder) (Order, error) {
+	if in.Source != SourceWhatsApp && in.Source != SourceShop {
+		return Order{}, &catalog.ValidationError{Fields: []catalog.FieldError{{Field: "source", Message: "Choose WhatsApp or shop."}}}
+	}
+	return s.create(ctx, in, scopeAdminCreateOrder)
+}
+
+// CreateWebsite places a website order as AWAITING_PAYMENT and returns it. It takes no
+// stock: stock goes down when the order is paid. Unpaid orders are cancelled after PayWithin.
+func (s *Store) CreateWebsite(ctx context.Context, in WebsiteOrder) (Order, error) {
+	m := ManualOrder{
+		Source: SourceWebsite, CustomerName: in.CustomerName, CustomerPhone: in.CustomerPhone,
+		Items: make([]ManualItem, len(in.Items)), Fulfilment: in.Fulfilment, DeliveryZoneID: in.DeliveryZoneID,
+		Address: in.Address, IdempotencyKey: in.IdempotencyKey,
+	}
+	for i, it := range in.Items {
+		m.Items[i] = ManualItem{ProductID: it.ProductID, Quantity: it.Quantity, ColorName: it.ColorName}
+	}
+	return s.create(ctx, m, scopeCreateOrder)
+}
+
+// create records a manual or website order. Website orders have no payment, no agreed prices
+// and no actor, which the types above guarantee.
+func (s *Store) create(ctx context.Context, in ManualOrder, scope string) (Order, error) {
+	website := in.Source == SourceWebsite
 	in, customerPhone, errs := in.normalise()
 	if len(errs) > 0 {
 		return Order{}, &catalog.ValidationError{Fields: errs}
@@ -79,11 +143,11 @@ func (s *Store) CreateManual(ctx context.Context, in ManualOrder) (Order, error)
 	var orderID uuid.UUID
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if in.IdempotencyKey != "" {
-			if err := claimKey(tx, scopeAdminCreateOrder, in.IdempotencyKey, in); err != nil {
+			if err := claimKey(tx, scope, in.IdempotencyKey, in); err != nil {
 				return err
 			}
 		}
-		lines, err := priceLines(tx, in.Items)
+		lines, err := priceLines(tx, in.Items, website)
 		if err != nil {
 			return err
 		}
@@ -106,7 +170,7 @@ func (s *Store) CreateManual(ctx context.Context, in ManualOrder) (Order, error)
 			}
 		}
 
-		customerID, err := upsertCustomer(tx, in.CustomerName, customerPhone)
+		customerID, err := upsertCustomer(tx, in.CustomerName, customerPhone, website)
 		if err != nil {
 			return err
 		}
@@ -131,8 +195,12 @@ func (s *Store) CreateManual(ctx context.Context, in ManualOrder) (Order, error)
 				return fmt.Errorf("insert order item: %w", err)
 			}
 		}
+		var actor *uuid.UUID // nil for the website: the customer placed it
+		if !website {
+			actor = &in.ActorID
+		}
 		if err := tx.Exec(`INSERT INTO order_events (order_id, from_status, to_status, actor_staff_id, notified_via)
-			VALUES (?, NULL, ?, ?, 'NONE')`, o.ID, AwaitingPayment, in.ActorID).Error; err != nil {
+			VALUES (?, NULL, ?, ?, 'NONE')`, o.ID, AwaitingPayment, actor).Error; err != nil {
 			return fmt.Errorf("insert order event: %w", err)
 		}
 
@@ -152,7 +220,7 @@ func (s *Store) CreateManual(ctx context.Context, in ManualOrder) (Order, error)
 
 		if in.IdempotencyKey != "" {
 			if err := tx.Exec(`UPDATE idempotency_keys SET order_id = ? WHERE scope = ? AND key = ?`,
-				o.ID, scopeAdminCreateOrder, in.IdempotencyKey).Error; err != nil {
+				o.ID, scope, in.IdempotencyKey).Error; err != nil {
 				return fmt.Errorf("store idempotency key: %w", err)
 			}
 		}
@@ -278,9 +346,10 @@ type pricedLine struct {
 	ListPricePesewas int64
 }
 
-// priceLines looks up each item's product and prices it. Any product can be sold by staff,
-// drafts and hidden ones included: they are still pairs on the shelf.
-func priceLines(tx *gorm.DB, items []ManualItem) ([]pricedLine, error) {
+// priceLines looks up each item's product and prices it. Staff can sell any product, drafts
+// and hidden ones included: they are still pairs on the shelf. The website can only sell
+// published, visible products with enough stock, always at the catalogue price.
+func priceLines(tx *gorm.DB, items []ManualItem, website bool) ([]pricedLine, error) {
 	ids := make([]uuid.UUID, len(items))
 	for i, it := range items {
 		ids[i] = it.ProductID
@@ -290,9 +359,12 @@ func priceLines(tx *gorm.DB, items []ManualItem) ([]pricedLine, error) {
 		ModelName    string
 		BrandName    string
 		PricePesewas int64
+		OnSale       bool
+		Stock        int
 	}
-	if err := tx.Raw(`SELECT p.id, p.model_name, b.name AS brand_name, p.price_pesewas
-		FROM products p JOIN brands b ON b.id = p.brand_id WHERE p.id IN ?`, ids).Scan(&products).Error; err != nil {
+	if err := tx.Raw(`SELECT p.id, p.model_name, b.name AS brand_name, p.price_pesewas,
+			p.status = ? AND p.is_visible AS on_sale, p.stock
+		FROM products p JOIN brands b ON b.id = p.brand_id WHERE p.id IN ?`, catalog.StatusPublished, ids).Scan(&products).Error; err != nil {
 		return nil, fmt.Errorf("order products: %w", err)
 	}
 	var colors []models.ProductColor
@@ -300,7 +372,11 @@ func priceLines(tx *gorm.DB, items []ManualItem) ([]pricedLine, error) {
 		return nil, fmt.Errorf("order product colours: %w", err)
 	}
 
-	var errs []catalog.FieldError
+	var errs, unavailable, short []catalog.FieldError
+	wanted := map[uuid.UUID]int{} // units per product, across lines
+	for _, it := range items {
+		wanted[it.ProductID] += it.Quantity
+	}
 	lines := make([]pricedLine, len(items))
 	for i, it := range items {
 		at := fmt.Sprintf("items[%d].", i)
@@ -310,14 +386,26 @@ func priceLines(tx *gorm.DB, items []ManualItem) ([]pricedLine, error) {
 				idx = j
 			}
 		}
-		if idx < 0 {
+		onSale := idx >= 0 && products[idx].OnSale
+		switch {
+		case website && !onSale: // unknown, draft or hidden: the same answer for all three
+			unavailable = append(unavailable, catalog.FieldError{Field: at + "productId", Message: "This product is no longer on sale."})
+			continue
+		case idx < 0:
 			errs = append(errs, catalog.FieldError{Field: at + "productId", Message: "Choose a product from the list."})
 			continue
 		}
 		p := products[idx]
+		if website && wanted[p.ID] > p.Stock {
+			msg := "Sold out."
+			if p.Stock > 0 {
+				msg = fmt.Sprintf("Only %d left.", p.Stock)
+			}
+			short = append(short, catalog.FieldError{Field: at + "quantity", Message: msg})
+		}
 		l := pricedLine{ProductID: p.ID, ModelName: p.ModelName, BrandName: p.BrandName, Quantity: it.Quantity,
 			UnitPricePesewas: p.PricePesewas, ListPricePesewas: p.PricePesewas}
-		if it.UnitPricePesewas != nil {
+		if it.UnitPricePesewas != nil && !website { // the website never sets prices
 			l.UnitPricePesewas = *it.UnitPricePesewas
 		}
 		if it.ColorName != nil {
@@ -333,8 +421,13 @@ func priceLines(tx *gorm.DB, items []ManualItem) ([]pricedLine, error) {
 		}
 		lines[i] = l
 	}
-	if errs != nil {
+	switch {
+	case unavailable != nil: // first: the cart needs re-quoting anyway
+		return nil, &CartError{Err: ErrProductUnavailable, Lines: unavailable}
+	case errs != nil:
 		return nil, &catalog.ValidationError{Fields: errs}
+	case short != nil:
+		return nil, &CartError{Err: ErrOutOfStock, Lines: short}
 	}
 	return lines, nil
 }
@@ -351,12 +444,16 @@ func activeZone(tx *gorm.DB, id uuid.UUID) (models.DeliveryZone, error) {
 	return zones[0], nil
 }
 
-// upsertCustomer finds the customer by phone, or adds them. One customer per phone; the
-// latest name typed wins, since staff copy it from the chat.
-func upsertCustomer(tx *gorm.DB, name, e164 string) (uuid.UUID, error) {
+// upsertCustomer finds the customer by phone, or adds them. One customer per phone. From
+// staff, the latest name typed wins, since they copy it from the chat. From the website it
+// doesn't: anyone can type anyone's number there, and must not rename that customer.
+func upsertCustomer(tx *gorm.DB, name, e164 string, keepName bool) (uuid.UUID, error) {
+	onConflict := `ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name`
+	if keepName {
+		onConflict = `ON CONFLICT (phone) DO UPDATE SET phone = EXCLUDED.phone` // a no-op that still returns the id
+	}
 	var row returnedID
-	if err := tx.Raw(`INSERT INTO customers (name, phone) VALUES (?, ?)
-		ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name RETURNING id`, name, e164).Scan(&row).Error; err != nil {
+	if err := tx.Raw(`INSERT INTO customers (name, phone) VALUES (?, ?) `+onConflict+` RETURNING id`, name, e164).Scan(&row).Error; err != nil {
 		return uuid.Nil, fmt.Errorf("upsert customer: %w", err)
 	}
 	return row.ID, nil

@@ -57,6 +57,19 @@ type Config struct {
 
 	// Owner, when set, creates the first OWNER account on startup if there is none yet.
 	Owner *OwnerBootstrap
+
+	// PaymentProvider takes online payments: "fake" (development and tests only), or ""
+	// for none, in which case the website can't take payments. TODO(open): Paystack or
+	// Hubtel (BRIEF §8).
+	PaymentProvider string
+	// FakePaymentWebhookSecret signs the fake provider's webhooks. At least 32 bytes.
+	FakePaymentWebhookSecret []byte
+	// FakePaymentDelay is how long a fake payment stays pending, like a customer reading
+	// the prompt on their phone.
+	FakePaymentDelay time.Duration
+	// HousekeepingInterval is how often the API checks pending payments with the provider
+	// and cancels unpaid website orders.
+	HousekeepingInterval time.Duration
 }
 
 // OwnerBootstrap is the first OWNER account, created once from env on an empty database.
@@ -177,6 +190,11 @@ func load(lookup func(string) (string, bool)) (Config, error) {
 
 	errs = append(errs, loadAuth(&cfg, get)...)
 
+	cfg.PaymentProvider = get("PAYMENT_PROVIDER", "")
+	cfg.FakePaymentDelay = getDuration("FAKE_PAYMENT_DELAY", 5*time.Second)
+	cfg.HousekeepingInterval = getDuration("HOUSEKEEPING_INTERVAL", 30*time.Second)
+	errs = append(errs, loadPayments(&cfg, get)...)
+
 	return cfg, errors.Join(errs...)
 }
 
@@ -224,4 +242,27 @@ func loadAuth(cfg *Config, get func(key, def string) string) []error {
 	}
 	cfg.Owner = &OwnerBootstrap{Name: name, Phone: e164, Password: password}
 	return errs
+}
+
+// loadPayments checks the payment provider settings.
+func loadPayments(cfg *Config, get func(key, def string) string) []error {
+	switch cfg.PaymentProvider {
+	case "":
+		return nil
+	case "fake":
+		// The fake provider says yes to every payment without moving money, so in
+		// production it would hand out goods for free.
+		if cfg.IsProduction() {
+			return []error{errors.New("PAYMENT_PROVIDER=fake is not allowed in production")}
+		}
+		secret := get("FAKE_PAYMENT_WEBHOOK_SECRET", "")
+		if len(secret) < 32 {
+			return []error{errors.New("FAKE_PAYMENT_WEBHOOK_SECRET must be at least 32 bytes when PAYMENT_PROVIDER=fake")}
+		}
+		cfg.FakePaymentWebhookSecret = []byte(secret)
+		return nil
+	default:
+		// TODO(open): paystack or hubtel (BRIEF §8).
+		return []error{fmt.Errorf("PAYMENT_PROVIDER must be fake or empty, got %q", cfg.PaymentProvider)}
+	}
 }

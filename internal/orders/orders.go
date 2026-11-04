@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 
 	"theblinksframe-backend/internal/models"
+	"theblinksframe-backend/internal/payments"
 )
 
 var (
@@ -37,11 +38,15 @@ var (
 )
 
 // Store reads orders and changes their status.
-type Store struct{ db *gorm.DB }
+type Store struct {
+	db       *gorm.DB
+	provider payments.Provider // nil when online payments are off
+}
 
-// NewStore returns a Store backed by db.
-func NewStore(db *gorm.DB) *Store {
-	return &Store{db: db}
+// NewStore returns a Store backed by db. provider takes online payments; nil turns them off
+// (StartPayment then returns ErrPaymentsOff).
+func NewStore(db *gorm.DB, provider payments.Provider) *Store {
+	return &Store{db: db, provider: provider}
 }
 
 // Order is an order with everything the admin order page shows.
@@ -97,7 +102,8 @@ type Item struct {
 	LineTotalPesewas int64
 }
 
-// Payment is one payment attempt.
+// Payment is one payment attempt. FailureReason, NextAction and RedirectURL are only set
+// for online attempts.
 type Payment struct {
 	ID            uuid.UUID
 	Provider      string
@@ -105,6 +111,9 @@ type Payment struct {
 	AmountPesewas int64
 	Reference     string
 	Status        string
+	FailureReason *string
+	NextAction    *string
+	RedirectURL   *string
 	CreatedAt     time.Time
 	PaidAt        *time.Time
 }
@@ -187,11 +196,11 @@ func (s *Store) get(db *gorm.DB, id uuid.UUID) (Order, error) {
 	}
 
 	o.Payments = []Payment{}
-	if err := db.Raw(`SELECT id, provider, network, amount_pesewas, provider_reference AS reference, status,
-	                         created_at, paid_at
-	                  FROM payments WHERE order_id = ? ORDER BY created_at DESC, id DESC`, id).Scan(&o.Payments).Error; err != nil {
-		return Order{}, fmt.Errorf("order payments: %w", err)
+	attempts, err := loadPayments(db, id)
+	if err != nil {
+		return Order{}, err
 	}
+	o.Payments = attempts
 
 	events, err := loadEvents(db, id)
 	if err != nil {
@@ -199,6 +208,18 @@ func (s *Store) get(db *gorm.DB, id uuid.UUID) (Order, error) {
 	}
 	o.Events = events
 	return o, nil
+}
+
+// loadPayments returns an order's payment attempts, newest first.
+func loadPayments(db *gorm.DB, orderID uuid.UUID) ([]Payment, error) {
+	out := []Payment{}
+	err := db.Raw(`SELECT id, provider, network, amount_pesewas, provider_reference AS reference, status,
+	                      failure_reason, next_action, redirect_url, created_at, paid_at
+	               FROM payments WHERE order_id = ? ORDER BY created_at DESC, id DESC`, orderID).Scan(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("order payments: %w", err)
+	}
+	return out, nil
 }
 
 // loadEvents returns an order's events, oldest first. Events written in one transaction

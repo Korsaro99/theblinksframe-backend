@@ -100,8 +100,8 @@ Besides shipping the shop, this project is how the developer learns to **build a
 - **PROPOSED** (decide when the milestone starts):
   - **Media (M2):** undecided between Cloudinary's free plan and Oracle Object Storage, behind a `MediaStore` interface. Store URL, width and height; keep originals; limit upload size and type.
   - **Excel export (Phase 2):** `excelize`.
-  - **Background jobs (M4 onwards):** goroutine tickers inside the API binary, made safe with a Postgres advisory lock. They cover:
-    - auto-cancelling unpaid website orders after 30 minutes;
+  - **Background jobs (M4 onwards):** goroutine tickers inside the API binary, made safe with a Postgres advisory lock. Built for orders (`orders.Store.Housekeep`, run from `cmd/api`); confirm the approach. They cover:
+    - auto-cancelling unpaid website orders after 30 minutes, and checking pending payments whose webhook never came (built);
     - sending queued notifications;
     - nightly insights;
     - the Monday WhatsApp summary.
@@ -122,8 +122,9 @@ internal/
   auth/            staff users, JWT, refresh-token rotation, CSRF, rate limits, Casbin
   catalog/         brands, products, colours, media, price bands, menu counts, sales figures
   delivery/        delivery zones and riders (cart quote: later)
-  orders/          order detail, state machine, transitions, undo, stock, manual orders, confirm-payment; (M4) website orders
-  payments/        (M4) Provider interface; paystack/, hubtel/, fake/; webhooks
+  orders/          order detail, state machine, transitions, undo, stock, manual and website orders, payments, housekeeping
+  payments/        Provider interface and fake/ (development only); (later) paystack/ or hubtel/
+  platform/ratelimit/  per-IP request limits for public endpoints (in memory)
   notify/          (M5) outbox, WhatsApp and SMS senders, templates from settings
   analytics/       (M6) dashboard queries, rankings, brand table, insights, xlsx export
   settings/        (later) shop settings
@@ -162,7 +163,7 @@ Packages marked with a milestone don't exist yet: they are created when their mi
   - writes an `OrderEvent` (undos point at the event they reverse);
   - adjusts stock: down when the order enters a status that holds stock (`HoldsStock`: PAID onwards), back up when it leaves them (`→ CANCELLED`, or an undo); `order_items.stock_deducted` records what was taken;
   - adds the customer notification to an **outbox** table, sent after commit (TODO(M5): not built yet).
-  - Payments go through `payManually` (`internal/orders/payments.go`), which records the payment and calls `move()`; the provider webhook (M4) will add its own `orders.Store` method the same way, never writing the status itself.
+  - Payments go through `payManually` (`internal/orders/payments.go`) or `applySuccess` (`internal/orders/online.go`, after `Verify`), which record the payment and call `move()`; nothing else marks an order paid.
 - **Manual orders** (`orders.Store.CreateManual`) start as AWAITING_PAYMENT; with a payment they move to PAID in the same transaction, and a paid SHOP pickup on to DELIVERED (handed over at the counter). `Idempotency-Key` is claimed in that transaction (`claimKey`).
 - **Stock never goes negative.** Use `UPDATE … SET stock = stock - $1 WHERE id = $2 AND stock >= $1`. If that fails for a paid order, flag the order for the owner instead of losing the payment.
 - **Order items** snapshot the product name, brand name, unit price (charged) and list price (catalogue). Only manual (WhatsApp and shop) orders may set the unit price; website orders always charge the catalogue price.
@@ -174,7 +175,8 @@ Packages marked with a milestone don't exist yet: they are created when their mi
     - a server-side `Verify` call confirms the amount and currency (`GHS`).
   - Webhooks are idempotent on `(provider, providerReference)` (unique constraint). Store the raw payload, and return 200 quickly.
   - Test and live keys come from env.
-  - The provider (Paystack or Hubtel) is **OPEN**. Build against a `fake` provider first, and add the real one only after the developer confirms.
+  - The provider (Paystack or Hubtel) is **OPEN**. The `fake` provider (`internal/payments/fake`) is built and drives the tests; add the real one only after the developer confirms, and make it pass the same webhook and verify tests.
+  - Online payment flow (`internal/orders/online.go`): `StartPayment` records a PENDING attempt (our reference), then calls `Initiate` outside any transaction; `SettlePayment` (webhook or housekeeping) calls `Verify` and only then `applySuccess`. A payment arriving for an order that isn't awaiting payment is kept and the order flagged, never dropped.
 - **Revenue definition:** BRIEF §7.4 (PROPOSED: count by `paidAt`, excluding cancelled and refunded orders). It lives in one place, `countedOrders` in `internal/catalog/sales.go`, so changing the rule is a one-line change.
 - **Notifications:**
   - Templates come from Settings.
@@ -210,8 +212,8 @@ Packages marked with a milestone don't exist yet: they are created when their mi
 1. **Skeleton:** done (M1).
 2. **OpenAPI spec:** v0.2.0.
 3. **Auth and catalogue (M2):** staff auth done; brand CRUD done (reference example); admin products, the public catalogue and the seed done (task cards T01, T03–T09); media waits on the storage decision.
-4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; manual WhatsApp and shop orders and confirm-payment done; cart quote; website order creation.
-5. **Payments:** the interface plus the `fake` provider; then the chosen provider in sandbox; webhooks plus verify; auto-cancel job.
+4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; manual WhatsApp and shop orders and confirm-payment done; website order creation done; cart quote.
+5. **Payments:** the interface, the `fake` provider, pay, payment state, webhooks plus verify, and the housekeeping job (auto-cancel, missed webhooks) done; then the chosen provider in sandbox.
 6. **Notifications:** outbox and senders.
 7. **Analytics:** summary, revenue series (monthly and yearly), best sellers, ranking, brand table; xlsx export.
 8. **Phase 2:** insights (formulas in BRIEF §7.5) and the weekly summary job.

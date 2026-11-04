@@ -23,6 +23,7 @@ import (
 	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/models"
 	"theblinksframe-backend/internal/orders"
+	"theblinksframe-backend/internal/payments/fake"
 	"theblinksframe-backend/internal/platform/db/dbtest"
 	"theblinksframe-backend/internal/tasktest"
 )
@@ -55,11 +56,20 @@ type testAPI struct {
 	t      *testing.T
 	db     *gorm.DB
 	router *gin.Engine
-	seq    int // makes fixture names unique
+	orders *orders.Store  // for running Housekeep as the background job would
+	pay    *fake.Provider // the payment provider behind the router
+	seq    int            // makes fixture names unique
 }
 
-// newAPI empties the database and builds the real router on top of it.
+// newAPI empties the database and builds the real router on top of it. Its fake payment
+// provider settles at once: a payment stays PENDING until a webhook or Housekeep asks about it.
 func newAPI(t *testing.T) *testAPI {
+	t.Helper()
+	return newAPIWith(t, fake.New([]byte(testWebhookSecret), 0, nil))
+}
+
+// newAPIWith is newAPI with a payment provider of the test's choosing.
+func newAPIWith(t *testing.T, pay *fake.Provider) *testAPI {
 	t.Helper()
 	dbtest.Reset(t, testDB)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -67,6 +77,7 @@ func newAPI(t *testing.T) *testAPI {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store := orders.NewStore(testDB, pay)
 	router, err := NewRouter(Deps{
 		Log:          log,
 		DB:           fakePinger{},
@@ -76,13 +87,16 @@ func newAPI(t *testing.T) *testAPI {
 		Cookies:      CookieOptions{Secure: true},
 		Catalog:      catalog.NewStore(testDB, func() time.Time { return testNow }),
 		Delivery:     delivery.NewStore(testDB),
-		Orders:       orders.NewStore(testDB),
+		Orders:       store,
+		Payments:     pay,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &testAPI{t: t, db: testDB, router: router}
+	return &testAPI{t: t, db: testDB, router: router, orders: store, pay: pay}
 }
+
+const testWebhookSecret = "integration-webhook-secret-32-bytes!!"
 
 // pendingTask skips a test written ahead of its implementation (see docs/tasks). Run it
 // with `make task TASK=T01`. When the task is done, delete the pendingTask line so CI

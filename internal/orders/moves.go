@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -104,16 +105,18 @@ func undoTarget(events []Event, current Status) (Event, error) {
 // lockedOrder is what a move needs to know about the order it changes.
 type lockedOrder struct {
 	ID           uuid.UUID
+	Source       string
 	Status       Status
 	Fulfilment   Fulfilment
 	TotalPesewas int64
+	CreatedAt    time.Time
 }
 
 // lockOrder reads the order and locks its row until the transaction ends. Concurrent moves
 // on the same order therefore run one after the other, each seeing the last one's result.
 func lockOrder(tx *gorm.DB, id uuid.UUID) (lockedOrder, error) {
 	var rows []lockedOrder
-	if err := tx.Raw(`SELECT id, status, fulfilment, total_pesewas FROM orders WHERE id = ? FOR UPDATE`, id).Scan(&rows).Error; err != nil {
+	if err := tx.Raw(`SELECT id, source, status, fulfilment, total_pesewas, created_at FROM orders WHERE id = ? FOR UPDATE`, id).Scan(&rows).Error; err != nil {
 		return lockedOrder{}, fmt.Errorf("lock order: %w", err)
 	}
 	if len(rows) == 0 {
@@ -235,7 +238,12 @@ func takeStock(tx *gorm.DB, orderID uuid.UUID) error {
 	if len(short) == 0 {
 		return nil
 	}
-	reason := "Not enough stock for " + strings.Join(short, ", ") + ". Restock or cancel the order."
+	return flagOrder(tx, orderID, "Not enough stock for "+strings.Join(short, ", ")+". Restock or cancel the order.")
+}
+
+// flagOrder sets needsAttention with reason, adding to any reason already there, so the
+// owner sees every problem.
+func flagOrder(tx *gorm.DB, orderID uuid.UUID, reason string) error {
 	if err := tx.Exec(`UPDATE orders SET needs_attention = true,
 			attention_reason = CASE WHEN needs_attention THEN attention_reason || ' ' || ? ELSE ? END
 		WHERE id = ?`, reason, reason, orderID).Error; err != nil {

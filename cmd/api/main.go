@@ -18,6 +18,8 @@ import (
 	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi"
 	"theblinksframe-backend/internal/orders"
+	"theblinksframe-backend/internal/payments"
+	"theblinksframe-backend/internal/payments/fake"
 	"theblinksframe-backend/internal/platform/db"
 )
 
@@ -60,6 +62,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	provider := paymentProvider(cfg, log)
+	orderStore := orders.NewStore(gdb, provider)
+	go housekeep(ctx, orderStore, cfg.HousekeepingInterval, log)
+
 	handler, err := httpapi.NewRouter(httpapi.Deps{
 		Log:                log,
 		DB:                 sqlDB,
@@ -72,7 +78,8 @@ func run() error {
 		Cookies:            httpapi.CookieOptions{Secure: cfg.CookieSecure, Domain: cfg.CookieDomain},
 		Catalog:            catalog.NewStore(gdb, nil),
 		Delivery:           delivery.NewStore(gdb),
-		Orders:             orders.NewStore(gdb),
+		Orders:             orderStore,
+		Payments:           provider,
 	})
 	if err != nil {
 		return err
@@ -125,6 +132,45 @@ func bootstrapOwner(ctx context.Context, cfg config.Config, svc *auth.Service, l
 		log.Warn("an OWNER account already exists, so OWNER_BOOTSTRAP_* was ignored; remove OWNER_BOOTSTRAP_PASSWORD from the environment")
 	}
 	return nil
+}
+
+// paymentProvider returns the configured provider, or nil when online payments are off.
+// (A nil interface, never a typed nil pointer, so "provider == nil" checks work.)
+func paymentProvider(cfg config.Config, log *slog.Logger) payments.Provider {
+	switch cfg.PaymentProvider {
+	case "fake": // config refuses it in production
+		log.Warn("online payments use the FAKE provider: no money moves")
+		return fake.New(cfg.FakePaymentWebhookSecret, cfg.FakePaymentDelay, nil)
+	default:
+		log.Info("online payments are off (PAYMENT_PROVIDER is empty)")
+		return nil
+	}
+}
+
+// housekeep runs orders housekeeping every interval until ctx ends: it settles payments the
+// provider never told us about and cancels website orders not paid in time. Several API
+// instances may run it; an advisory lock in Housekeep lets only one do the work.
+func housekeep(ctx context.Context, store *orders.Store, every time.Duration, log *slog.Logger) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		res, err := store.Housekeep(ctx)
+		if err != nil {
+			log.Error("housekeeping failed", slog.Any("error", err))
+			continue
+		}
+		for _, e := range res.Errors {
+			log.Error("housekeeping: one item failed; next pass retries", slog.Any("error", e))
+		}
+		if res.Checked > 0 || res.Cancelled > 0 {
+			log.Info("housekeeping", slog.Int("paymentsChecked", res.Checked), slog.Int("ordersCancelled", res.Cancelled))
+		}
+	}
 }
 
 func newLogger(cfg config.Config) *slog.Logger {

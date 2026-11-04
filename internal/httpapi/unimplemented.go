@@ -24,14 +24,4 @@ func (unimplemented) AdminPatchOrder(c *gin.Context, _ gen.OrderId) { notImpleme
 
 func (unimplemented) QuoteCart(c *gin.Context) { notImplemented(c) }
 
-func (unimplemented) CreateOrder(c *gin.Context, _ gen.CreateOrderParams) { notImplemented(c) }
-
 func (unimplemented) TrackOrder(c *gin.Context) { notImplemented(c) }
-
-func (unimplemented) PayOrder(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
-
-func (unimplemented) GetOrderPayment(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
-
-func (unimplemented) ReceivePaymentWebhook(c *gin.Context, _ gen.ReceivePaymentWebhookParamsProvider) {
-	notImplemented(c)
-}

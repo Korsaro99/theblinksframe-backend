@@ -15,6 +15,8 @@ import (
 	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi/gen"
 	"theblinksframe-backend/internal/orders"
+	"theblinksframe-backend/internal/payments"
+	"theblinksframe-backend/internal/platform/ratelimit"
 )
 
 // Deps are the services the router needs.
@@ -35,7 +37,17 @@ type Deps struct {
 	Catalog  *catalog.Store
 	Delivery *delivery.Store
 	Orders   *orders.Store
+	// Payments is the online payment provider, also given to Orders; nil turns payments off.
+	Payments payments.Provider
 }
+
+// Public rate limits per client IP. A real customer places an order or two and taps Pay a
+// few times; these stop scripts creating orders in bulk or sending prompts to someone's phone.
+const (
+	ordersPerIP  = 20
+	paysPerIP    = 10
+	publicWindow = 10 * time.Minute
+)
 
 // NewRouter builds the HTTP handler for the whole API.
 func NewRouter(d Deps) (*gin.Engine, error) {
@@ -70,7 +82,8 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 
 	r.GET("/healthz", healthz(d.DB, d.Log))
 
-	srv := &Server{catalog: d.Catalog, delivery: d.Delivery, orders: d.Orders, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log}
+	srv := &Server{catalog: d.Catalog, delivery: d.Delivery, orders: d.Orders, payments: d.Payments, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log,
+		orderLimit: ratelimit.New(ordersPerIP, publicWindow, nil), payLimit: ratelimit.New(paysPerIP, publicWindow, nil)}
 	spec, err := gen.GetSwagger()
 	if err != nil {
 		return nil, fmt.Errorf("load embedded openapi spec: %w", err)

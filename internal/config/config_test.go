@@ -100,6 +100,37 @@ func TestLoad(t *testing.T) {
 			wantErr: []string{"is not an origin"},
 		},
 		{
+			name: "fake payments in development",
+			env: map[string]string{
+				"DATABASE_URL": "x", "PAYMENT_PROVIDER": "fake", "FAKE_PAYMENT_WEBHOOK_SECRET": testSecret,
+				"FAKE_PAYMENT_DELAY": "1s",
+			},
+			check: func(t *testing.T, c Config) {
+				if c.PaymentProvider != "fake" || string(c.FakePaymentWebhookSecret) != testSecret ||
+					c.FakePaymentDelay != time.Second || c.HousekeepingInterval != 30*time.Second {
+					t.Errorf("payments = %q, %q, %v, %v", c.PaymentProvider, c.FakePaymentWebhookSecret, c.FakePaymentDelay, c.HousekeepingInterval)
+				}
+			},
+		},
+		{
+			name: "production refuses fake payments",
+			env: map[string]string{
+				"DATABASE_URL": "x", "APP_ENV": "production", "CORS_ALLOWED_ORIGINS": "https://theblinks.example",
+				"PAYMENT_PROVIDER": "fake", "FAKE_PAYMENT_WEBHOOK_SECRET": testSecret,
+			},
+			wantErr: []string{"PAYMENT_PROVIDER=fake is not allowed in production"},
+		},
+		{
+			name:    "fake payments need a webhook secret",
+			env:     map[string]string{"DATABASE_URL": "x", "PAYMENT_PROVIDER": "fake", "FAKE_PAYMENT_WEBHOOK_SECRET": "short"},
+			wantErr: []string{"FAKE_PAYMENT_WEBHOOK_SECRET must be at least 32 bytes"},
+		},
+		{
+			name:    "unknown payment provider",
+			env:     map[string]string{"DATABASE_URL": "x", "PAYMENT_PROVIDER": "momo-direct"},
+			wantErr: []string{"PAYMENT_PROVIDER must be fake or empty"},
+		},
+		{
 			name:    "jwt secret required",
 			env:     map[string]string{"DATABASE_URL": "x", "JWT_SECRET": ""},
 			wantErr: []string{"JWT_SECRET is required"},
