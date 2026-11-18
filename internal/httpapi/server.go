@@ -46,21 +46,22 @@ type LoginLimiter interface {
 
 // Server implements the operations of api/openapi.yaml (gen.ServerInterface).
 type Server struct {
-	unimplemented
-	catalog  *catalog.Store
-	delivery *delivery.Store
-	orders   *orders.Store
-	media    *media.Library
-	payments payments.Provider // nil when online payments are off
-	auth     AuthService
-	authz    Authorizer
-	limiter  LoginLimiter
-	cookies  CookieOptions
-	log      *slog.Logger
+	unimplemented //nolint:unused // answers 501 for spec operations not built yet (unimplemented.go)
+	catalog       *catalog.Store
+	delivery      *delivery.Store
+	orders        *orders.Store
+	media         *media.Library
+	payments      payments.Provider // nil when online payments are off
+	auth          AuthService
+	authz         Authorizer
+	limiter       LoginLimiter
+	cookies       CookieOptions
+	log           *slog.Logger
 
 	// Per-IP limits on the public endpoints that cost something.
 	orderLimit *ratelimit.Window
 	payLimit   *ratelimit.Window
+	trackLimit *ratelimit.Window
 }
 
 var _ gen.ServerInterface = (*Server)(nil)

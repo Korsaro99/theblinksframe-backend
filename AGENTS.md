@@ -215,7 +215,7 @@ Packages marked with a milestone don't exist yet: they are created when their mi
 1. **Skeleton:** done (M1).
 2. **OpenAPI spec:** v0.2.0.
 3. **Auth and catalogue (M2):** staff auth done; brand CRUD done (reference example); admin products, the public catalogue and the seed done (task cards T01, T03–T09); media upload, cover, order and delete done.
-4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; manual WhatsApp and shop orders and confirm-payment done; website order creation done; cart quote done (discounts wait for the "Buy 2" rules, OPEN); admin orders list and pipeline done (T10).
+4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; manual WhatsApp and shop orders and confirm-payment done; website order creation done; cart quote done (discounts wait for the "Buy 2" rules, OPEN); admin orders list and pipeline done (T10); edit an order (private note, clear the attention flag) done; customer order tracking done. Every operation in the spec v0.3.0 is now built.
 5. **Payments:** the interface, the `fake` provider, pay, payment state, webhooks plus verify, and the housekeeping job (auto-cancel, missed webhooks) done; then the chosen provider in sandbox.
 6. **Notifications:** outbox and senders.
 7. **Analytics:** summary, revenue series (monthly and yearly), best sellers, ranking, brand table; xlsx export.

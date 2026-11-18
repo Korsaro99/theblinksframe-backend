@@ -48,9 +48,11 @@ type Deps struct {
 
 // Public rate limits per client IP. A real customer places an order or two and taps Pay a
 // few times; these stop scripts creating orders in bulk or sending prompts to someone's phone.
+// Tracking allows for a few typos, but not for trying order numbers or phones one by one.
 const (
 	ordersPerIP  = 20
 	paysPerIP    = 10
+	tracksPerIP  = 20
 	publicWindow = 10 * time.Minute
 )
 
@@ -91,7 +93,8 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	}
 
 	srv := &Server{catalog: d.Catalog, delivery: d.Delivery, orders: d.Orders, media: d.Media, payments: d.Payments, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log,
-		orderLimit: ratelimit.New(ordersPerIP, publicWindow, nil), payLimit: ratelimit.New(paysPerIP, publicWindow, nil)}
+		orderLimit: ratelimit.New(ordersPerIP, publicWindow, nil), payLimit: ratelimit.New(paysPerIP, publicWindow, nil),
+		trackLimit: ratelimit.New(tracksPerIP, publicWindow, nil)}
 	spec, err := gen.GetSwagger()
 	if err != nil {
 		return nil, fmt.Errorf("load embedded openapi spec: %w", err)

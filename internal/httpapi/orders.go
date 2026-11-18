@@ -113,6 +113,40 @@ func (s *Server) ReceivePaymentWebhook(c *gin.Context, provider gen.ReceivePayme
 	c.Status(http.StatusOK)
 }
 
+// TrackOrder implements POST /orders/track. The phone travels in the body, never the URL,
+// and is not logged. A wrong phone gets the same 404 as an unknown order number.
+func (s *Server) TrackOrder(c *gin.Context) {
+	if !s.allow(c, s.trackLimit, "Too many tries from here. Please wait a few minutes, or message us on WhatsApp.") {
+		return
+	}
+	var req gen.TrackOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "BAD_REQUEST", "The request is not in the expected format.")
+		return
+	}
+	t, err := s.orders.Track(c.Request.Context(), req.Number, req.Phone)
+	if err != nil {
+		s.writeOrderError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toGenOrderTracking(t))
+}
+
+func toGenOrderTracking(t orders.Tracking) gen.OrderTracking {
+	out := gen.OrderTracking{
+		Number: t.Number, Status: gen.OrderStatus(t.Status), Fulfilment: gen.Fulfilment(t.Fulfilment),
+		TotalPesewas: t.TotalPesewas, CreatedAt: t.CreatedAt.UTC(),
+		Items: make([]gen.TrackingItem, len(t.Items)), Timeline: make([]gen.TrackingStep, len(t.Timeline)),
+	}
+	for i, it := range t.Items {
+		out.Items[i] = gen.TrackingItem{ModelName: it.ModelName, BrandName: it.BrandName, ColorName: it.ColorName, Quantity: it.Quantity}
+	}
+	for i, st := range t.Timeline {
+		out.Timeline[i] = gen.TrackingStep{Status: gen.OrderStatus(st.Status), At: st.At.UTC()}
+	}
+	return out
+}
+
 // allow applies a per-IP rate limit and answers 429 when it is exceeded.
 func (s *Server) allow(c *gin.Context, w *ratelimit.Window, detail string) bool {
 	ok, wait := w.Allow(c.ClientIP())
