@@ -31,6 +31,10 @@ test: ## Run unit tests
 test-integration: ## Run all tests, including those against a real Postgres (needs Docker)
 	go test -race -tags=integration ./...
 
+.PHONY: test-oracle
+test-oracle: ## Check the real Oracle media buckets with MEDIA_S3_* from .env (deploy/README.md, "Media")
+	go test -tags=oracle -count=1 -run TestOracle -v ./internal/media
+
 .PHONY: check
 check: lint gen-check tidy-check test-integration ## Everything CI checks; run before every commit (needs Docker)
 

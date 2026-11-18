@@ -227,15 +227,16 @@ func TestAdminRoutesNeedLogin(t *testing.T) {
 		{"mutation with another session's csrf", "", request{method: "POST", path: "/api/v1/auth/logout", cookies: logged, csrf: "csrf-" + uuid.NewString()}, 403, "CSRF_INVALID"},
 		{"staff may not delete a brand", models.RoleStaff, request{method: "DELETE", path: "/api/v1/admin/brands/" + uuid.NewString(), cookies: logged, csrf: csrf}, 403, "FORBIDDEN"},
 		{"staff may not undo an order move", models.RoleStaff, request{method: "POST", path: "/api/v1/admin/orders/" + uuid.NewString() + "/undo", cookies: logged, csrf: csrf}, 403, "FORBIDDEN"},
-		{"staff may read orders", models.RoleStaff, request{method: "GET", path: "/api/v1/admin/orders", cookies: logged}, 501, "NOT_IMPLEMENTED"},
+		// Staff get past the login and role checks to request validation (a bad id), which
+		// needs no database.
+		{"staff may read orders", models.RoleStaff, request{method: "GET", path: "/api/v1/admin/orders/not-a-uuid", cookies: logged}, 400, "BAD_REQUEST"},
 		// The owner's undo itself is tested against a database in TestAdminUndo. Here, a
 		// mutating route that is still a stub shows the owner gets past role and CSRF checks.
 		// Move it to another stub when this one is implemented.
 		{"owner may edit an order note", models.RoleOwner, request{method: "PATCH", path: "/api/v1/admin/orders/" + uuid.NewString(), body: `{"privateNote":"Call first"}`, cookies: logged, csrf: csrf}, 501, "NOT_IMPLEMENTED"},
 		// Probe a public route that is still a stub, so the test needs no database. Move it
 		// to another stub when this one is implemented.
-		{"public route needs no login", "", request{method: "POST", path: "/api/v1/cart/quote", body: `{"items":[{"productId":"` + uuid.NewString() + `","quantity":1}],"fulfilment":"PICKUP"}`}, 501, "NOT_IMPLEMENTED"},
-		{"order tracking route exists", "", request{method: "POST", path: "/api/v1/orders/track", body: `{"number":1091,"phone":"0241234567"}`}, 501, "NOT_IMPLEMENTED"},
+		{"public route needs no login", "", request{method: "POST", path: "/api/v1/orders/track", body: `{"number":1091,"phone":"0241234567"}`}, 501, "NOT_IMPLEMENTED"},
 		{"bad path parameter", models.RoleOwner, request{method: "GET", path: "/api/v1/admin/orders/not-a-uuid", cookies: logged}, 400, "BAD_REQUEST"},
 		{"body too large", "", request{method: "POST", path: "/api/v1/auth/login", body: `{"login":"` + strings.Repeat("x", maxJSONBody) + `"}`}, 413, "TOO_LARGE"},
 	}

@@ -17,7 +17,7 @@ import (
 // TestS3 runs the S3 storage against SeaweedFS, an S3-compatible server, standing in for
 // Oracle Object Storage's S3-compatible API. It checks the requests are signed (a wrong
 // secret is refused), originals stay out of the public bucket, and DeletePrefix empties both.
-// TODO: once the Oracle buckets exist, try it against Oracle itself (deploy/README.md, "Media").
+// s3_oracle_test.go (make test-oracle) runs the same checks against the real Oracle buckets.
 func TestS3(t *testing.T) {
 	ctx := context.Background()
 	const access, secret = "test-access-key", "test-secret-key-that-is-long-enough"

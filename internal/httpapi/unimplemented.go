@@ -16,12 +16,6 @@ func notImplemented(c *gin.Context) {
 	WriteProblem(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "This part of the API is not built yet.")
 }
 
-func (unimplemented) AdminListOrders(c *gin.Context, _ gen.AdminListOrdersParams) { notImplemented(c) }
-
-func (unimplemented) AdminGetOrderPipeline(c *gin.Context) { notImplemented(c) }
-
 func (unimplemented) AdminPatchOrder(c *gin.Context, _ gen.OrderId) { notImplemented(c) }
-
-func (unimplemented) QuoteCart(c *gin.Context) { notImplemented(c) }
 
 func (unimplemented) TrackOrder(c *gin.Context) { notImplemented(c) }

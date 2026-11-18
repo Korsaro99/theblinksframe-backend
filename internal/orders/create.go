@@ -155,13 +155,9 @@ func (s *Store) create(ctx context.Context, in ManualOrder, scope string) (Order
 		for _, l := range lines {
 			subtotal += l.UnitPricePesewas * int64(l.Quantity)
 		}
-		var fee int64
-		if in.Fulfilment == Delivery {
-			zone, err := activeZone(tx, *in.DeliveryZoneID)
-			if err != nil {
-				return err
-			}
-			fee = delivery.Fee(zone, subtotal)
+		fee, err := deliveryFee(tx, in.Fulfilment, in.DeliveryZoneID, subtotal)
+		if err != nil {
+			return err
 		}
 		total := subtotal + fee // discounts: TODO(open) the "Buy 2" deal (BRIEF §9)
 		if in.Payment != nil {
@@ -346,56 +342,102 @@ type pricedLine struct {
 	ListPricePesewas int64
 }
 
+// cartProduct is what pricing needs to know about a product.
+type cartProduct struct {
+	ID                uuid.UUID
+	Slug              string
+	ModelName         string
+	BrandName         string
+	PricePesewas      int64
+	OnSale            bool // published and visible: the website can sell it
+	Stock             int
+	LowStockThreshold int
+}
+
+// loadCartProducts reads the products in a cart and their colours, keyed by product id. A
+// product that doesn't exist is simply missing from the map.
+func loadCartProducts(tx *gorm.DB, ids []uuid.UUID) (map[uuid.UUID]cartProduct, []models.ProductColor, error) {
+	var rows []cartProduct
+	if err := tx.Raw(`SELECT p.id, p.slug, p.model_name, b.name AS brand_name, p.price_pesewas,
+			p.status = ? AND p.is_visible AS on_sale, p.stock, p.low_stock_threshold
+		FROM products p JOIN brands b ON b.id = p.brand_id WHERE p.id IN ?`, catalog.StatusPublished, ids).Scan(&rows).Error; err != nil {
+		return nil, nil, fmt.Errorf("cart products: %w", err)
+	}
+	var colors []models.ProductColor
+	if err := tx.Where("product_id IN ?", ids).Find(&colors).Error; err != nil {
+		return nil, nil, fmt.Errorf("cart product colours: %w", err)
+	}
+	byID := make(map[uuid.UUID]cartProduct, len(rows))
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	return byID, colors, nil
+}
+
+// unitsWanted adds up the units asked for per product, across lines: two lines of the same
+// pair in different colours draw on the same stock.
+func unitsWanted[T any](items []T, line func(T) (uuid.UUID, int)) map[uuid.UUID]int {
+	wanted := map[uuid.UUID]int{}
+	for _, it := range items {
+		id, n := line(it)
+		wanted[id] += n
+	}
+	return wanted
+}
+
+// matchColor returns the catalogue's spelling of one of the product's colours, matched
+// without regard to case, or nil when the product has no colour by that name.
+func matchColor(colors []models.ProductColor, productID uuid.UUID, name string) *string {
+	for _, c := range colors {
+		if c.ProductID == productID && strings.EqualFold(c.Name, name) {
+			n := c.Name
+			return &n
+		}
+	}
+	return nil
+}
+
+// deliveryFee prices delivery for an order whose items come to subtotal (delivery.Fee), or
+// 0 for pickup. A DELIVERY order's zone must be one of the active zones.
+func deliveryFee(tx *gorm.DB, f Fulfilment, zoneID *uuid.UUID, subtotal int64) (int64, error) {
+	if f != Delivery {
+		return 0, nil
+	}
+	zone, err := activeZone(tx, *zoneID)
+	if err != nil {
+		return 0, err
+	}
+	return delivery.Fee(zone, subtotal), nil
+}
+
 // priceLines looks up each item's product and prices it. Staff can sell any product, drafts
 // and hidden ones included: they are still pairs on the shelf. The website can only sell
-// published, visible products with enough stock, always at the catalogue price.
+// published, visible products with enough stock, always at the catalogue price. Quote
+// applies the same rules line by line.
 func priceLines(tx *gorm.DB, items []ManualItem, website bool) ([]pricedLine, error) {
 	ids := make([]uuid.UUID, len(items))
 	for i, it := range items {
 		ids[i] = it.ProductID
 	}
-	var products []struct {
-		ID           uuid.UUID
-		ModelName    string
-		BrandName    string
-		PricePesewas int64
-		OnSale       bool
-		Stock        int
-	}
-	if err := tx.Raw(`SELECT p.id, p.model_name, b.name AS brand_name, p.price_pesewas,
-			p.status = ? AND p.is_visible AS on_sale, p.stock
-		FROM products p JOIN brands b ON b.id = p.brand_id WHERE p.id IN ?`, catalog.StatusPublished, ids).Scan(&products).Error; err != nil {
+	products, colors, err := loadCartProducts(tx, ids)
+	if err != nil {
 		return nil, fmt.Errorf("order products: %w", err)
-	}
-	var colors []models.ProductColor
-	if err := tx.Where("product_id IN ?", ids).Find(&colors).Error; err != nil {
-		return nil, fmt.Errorf("order product colours: %w", err)
 	}
 
 	var errs, unavailable, short []catalog.FieldError
-	wanted := map[uuid.UUID]int{} // units per product, across lines
-	for _, it := range items {
-		wanted[it.ProductID] += it.Quantity
-	}
+	wanted := unitsWanted(items, func(it ManualItem) (uuid.UUID, int) { return it.ProductID, it.Quantity })
 	lines := make([]pricedLine, len(items))
 	for i, it := range items {
 		at := fmt.Sprintf("items[%d].", i)
-		idx := -1
-		for j, p := range products {
-			if p.ID == it.ProductID {
-				idx = j
-			}
-		}
-		onSale := idx >= 0 && products[idx].OnSale
+		p, found := products[it.ProductID]
 		switch {
-		case website && !onSale: // unknown, draft or hidden: the same answer for all three
+		case website && !p.OnSale: // unknown, draft or hidden: the same answer for all three
 			unavailable = append(unavailable, catalog.FieldError{Field: at + "productId", Message: "This product is no longer on sale."})
 			continue
-		case idx < 0:
+		case !found:
 			errs = append(errs, catalog.FieldError{Field: at + "productId", Message: "Choose a product from the list."})
 			continue
 		}
-		p := products[idx]
 		if website && wanted[p.ID] > p.Stock {
 			msg := "Sold out."
 			if p.Stock > 0 {
@@ -409,13 +451,7 @@ func priceLines(tx *gorm.DB, items []ManualItem, website bool) ([]pricedLine, er
 			l.UnitPricePesewas = *it.UnitPricePesewas
 		}
 		if it.ColorName != nil {
-			for _, c := range colors {
-				if c.ProductID == p.ID && strings.EqualFold(c.Name, *it.ColorName) {
-					name := c.Name // the catalogue's spelling
-					l.ColorName = &name
-				}
-			}
-			if l.ColorName == nil {
+			if l.ColorName = matchColor(colors, p.ID, *it.ColorName); l.ColorName == nil {
 				errs = append(errs, catalog.FieldError{Field: at + "colorName", Message: "Choose one of this product's colours."})
 			}
 		}
