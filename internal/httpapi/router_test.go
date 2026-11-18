@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,5 +157,33 @@ func TestCORSAllowsOnlyConfiguredOrigins(t *testing.T) {
 				t.Errorf("Access-Control-Allow-Origin = %q for origin %q, wantAllow %v", got, tt.origin, tt.wantAllow)
 			}
 		})
+	}
+}
+
+// The storefront and the API are on different origins, so the browser asks first (a preflight)
+// before sending a header the API must allow, and only shows the page response headers the API
+// exposes.
+func TestCORSAllowsCheckoutHeaders(t *testing.T) {
+	r := newTestRouter(fakePinger{})
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/orders", nil)
+	req.Header.Set("Origin", "http://localhost:4200")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "content-type,idempotency-key")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code >= 300 {
+		t.Fatalf("preflight for Idempotency-Key = %d, want 2xx", rec.Code)
+	}
+	if got := strings.ToLower(rec.Header().Get("Access-Control-Allow-Headers")); !strings.Contains(got, "idempotency-key") {
+		t.Errorf("Access-Control-Allow-Headers = %q, want it to include Idempotency-Key", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "http://localhost:4200")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if got := strings.ToLower(rec.Header().Get("Access-Control-Expose-Headers")); !strings.Contains(got, "retry-after") {
+		t.Errorf("Access-Control-Expose-Headers = %q, want it to include Retry-After", got)
 	}
 }
