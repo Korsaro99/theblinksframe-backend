@@ -45,6 +45,32 @@ func (s *Server) AdminTransitionOrder(c *gin.Context, orderID gen.OrderId) {
 	c.JSON(http.StatusOK, s.toGenAdminOrder(c, o))
 }
 
+// AdminPatchOrder implements PATCH /admin/orders/{orderId}: the private note, and clearing
+// the needs-attention flag. Who cleared which problem is logged, since the reason itself is
+// removed from the order. The reason is text the system wrote (stock or payment problems),
+// never customer details.
+func (s *Server) AdminPatchOrder(c *gin.Context, orderID gen.OrderId) {
+	var req gen.AdminOrderPatch
+	if err := c.ShouldBindJSON(&req); err != nil {
+		WriteProblem(c, http.StatusBadRequest, "BAD_REQUEST", "The request is not in the expected format.")
+		return
+	}
+	res, err := s.orders.Patch(c.Request.Context(), orderID, orders.OrderPatch{
+		PrivateNote: req.PrivateNote, NeedsAttention: req.NeedsAttention,
+	})
+	if err != nil {
+		s.writeOrderError(c, err)
+		return
+	}
+	if res.ClearedReason != "" {
+		p, _ := PrincipalFrom(c)
+		s.log.InfoContext(c.Request.Context(), "order attention cleared",
+			slog.String("requestId", RequestIDFrom(c)), slog.String("orderId", orderID.String()),
+			slog.String("staffId", p.Staff.ID.String()), slog.String("reason", res.ClearedReason))
+	}
+	c.JSON(http.StatusOK, s.toGenAdminOrder(c, res.Order))
+}
+
 // AdminUndoOrderTransition implements POST /admin/orders/{orderId}/undo (OWNER only, by the
 // Casbin policy).
 func (s *Server) AdminUndoOrderTransition(c *gin.Context, orderID gen.OrderId) {
