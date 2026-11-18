@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"theblinksframe-backend/internal/analytics"
 	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/config"
@@ -82,6 +83,7 @@ func run() error {
 		LoginLimiter:       auth.NewLoginLimiter(time.Now),
 		Cookies:            httpapi.CookieOptions{Secure: cfg.CookieSecure, Domain: cfg.CookieDomain},
 		Catalog:            catalog.NewStore(gdb, nil),
+		Analytics:          analytics.NewStore(gdb, nil),
 		Delivery:           delivery.NewStore(gdb),
 		Orders:             orderStore,
 		Media:              media.NewLibrary(gdb, store, log),

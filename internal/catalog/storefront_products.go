@@ -104,7 +104,7 @@ func (s *Store) ListStoreProducts(ctx context.Context, f StorefrontFilter) ([]mo
 		q = q.Joins(`LEFT JOIN (
 			SELECT oi.product_id, SUM(oi.quantity) AS units
 			FROM order_items oi JOIN orders o ON o.id = oi.order_id
-			WHERE `+countedOrders+` AND o.paid_at >= ? AND o.paid_at < ?
+			WHERE `+CountedOrders+` AND o.paid_at >= ? AND o.paid_at < ?
 			GROUP BY oi.product_id
 		) sales ON sales.product_id = products.id`, from, to)
 	}

@@ -9,15 +9,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// countedOrders is the rule for which orders count as sales (BRIEF §7.4, PROPOSED): paid,
+// CountedOrders is the rule for which orders count as sales (BRIEF §7.4, PROPOSED): paid,
 // dated by paid_at, and neither cancelled nor refunded. It is the only copy of the rule, so
-// changing it here changes every number that uses it. Use it with the orders table as "o".
-const countedOrders = `o.paid_at IS NOT NULL
+// changing it here changes every number that uses it (product sales, the storefront's best
+// sellers, and every dashboard figure in internal/analytics). Use it with the orders table
+// as "o". It is a fixed SQL fragment with no user input.
+const CountedOrders = `o.paid_at IS NOT NULL
 	AND o.status <> 'CANCELLED'
 	AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.status = 'REFUNDED')`
 
-// accra is the shop's time zone: reporting periods (day, month) are counted in it.
-var accra = func() *time.Location {
+// Accra is the shop's time zone: reporting periods (day, week, month, year) are counted in it.
+var Accra = func() *time.Location {
 	loc, err := time.LoadLocation("Africa/Accra")
 	if err != nil {
 		panic(err) // the time/tzdata import guarantees it exists
@@ -27,17 +29,17 @@ var accra = func() *time.Location {
 
 // ThisMonth returns the calendar month containing now, in Africa/Accra, as [from, to) in UTC.
 func ThisMonth(now time.Time) (from, to time.Time) {
-	local := now.In(accra)
-	start := time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, accra)
+	local := now.In(Accra)
+	start := time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, Accra)
 	return start.UTC(), start.AddDate(0, 1, 0).UTC()
 }
 
 // ThisWeek returns the week containing now, Monday 00:00 to the next Monday, in
 // Africa/Accra, as [from, to) in UTC.
 func ThisWeek(now time.Time) (from, to time.Time) {
-	local := now.In(accra)
+	local := now.In(Accra)
 	daysSinceMonday := (int(local.Weekday()) + 6) % 7 // Sunday is 0 in Go
-	start := time.Date(local.Year(), local.Month(), local.Day()-daysSinceMonday, 0, 0, 0, 0, accra)
+	start := time.Date(local.Year(), local.Month(), local.Day()-daysSinceMonday, 0, 0, 0, 0, Accra)
 	return start.UTC(), start.AddDate(0, 0, 7).UTC()
 }
 
@@ -63,7 +65,7 @@ func (s *Store) ProductSales(ctx context.Context, productIDs []uuid.UUID, from, 
 	             SUM(oi.quantity * oi.unit_price_pesewas) AS revenue_pesewas
 	      FROM order_items oi
 	      JOIN orders o ON o.id = oi.order_id
-	      WHERE ` + countedOrders + ` AND o.paid_at >= ? AND o.paid_at < ?`
+	      WHERE ` + CountedOrders + ` AND o.paid_at >= ? AND o.paid_at < ?`
 	args := []any{from, to}
 	if productIDs != nil {
 		if len(productIDs) == 0 {
