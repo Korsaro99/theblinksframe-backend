@@ -45,7 +45,8 @@ This repo is the REST API for The Blinks storefront and admin back office (sungl
   - Never use `AutoMigrate`; Liquibase owns the schema.
 - **Shared business rules**, which you call but don't change:
   - `catalog.PriceBand`, `PriceBandRange`, `StockStatus` and `Slugify`;
-  - `catalog.ThisMonth` and `Last30Days`;
+  - `catalog.CountedOrders` (which orders count as sales) and `catalog.Accra`;
+  - `catalog.ThisWeek`, `ThisMonth` and `Last30Days`;
   - `Store.ProductSales`, the only place that decides which orders count as sales;
   - `delivery.Fee`, the only place that prices delivery (zone fee, free from the zone's threshold).
 - **Tests:**
@@ -129,7 +130,7 @@ internal/
   payments/        Provider interface and fake/ (development only); (later) paystack/ or hubtel/
   platform/ratelimit/  per-IP request limits for public endpoints (in memory)
   notify/          (M5) outbox, WhatsApp and SMS senders, templates from settings
-  analytics/       (M6) dashboard queries, rankings, brand table, insights, xlsx export
+  analytics/       dashboard queries: KPIs, revenue series, best sellers, ranking, brand sales; (Phase 2) insights, xlsx export
   settings/        (later) shop settings
   seed/            fake development sample data (BRIEF §6); refuses APP_ENV=production
   tasktest/        `tasktest.Pending` for task-card tests outside httpapi
@@ -180,7 +181,7 @@ Packages marked with a milestone don't exist yet: they are created when their mi
   - Test and live keys come from env.
   - The provider (Paystack or Hubtel) is **OPEN**. The `fake` provider (`internal/payments/fake`) is built and drives the tests; add the real one only after the developer confirms, and make it pass the same webhook and verify tests.
   - Online payment flow (`internal/orders/online.go`): `StartPayment` records a PENDING attempt (our reference), then calls `Initiate` outside any transaction; `SettlePayment` (webhook or housekeeping) calls `Verify` and only then `applySuccess`. A payment arriving for an order that isn't awaiting payment is kept and the order flagged, never dropped.
-- **Revenue definition:** BRIEF §7.4 (PROPOSED: count by `paidAt`, excluding cancelled and refunded orders). It lives in one place, `countedOrders` in `internal/catalog/sales.go`, so changing the rule is a one-line change.
+- **Revenue definition:** BRIEF §7.4. Revenue is what the items sold for (DECIDED 2026-11-18: delivery fees are not revenue). Which orders count is PROPOSED: by `paidAt`, excluding cancelled and refunded orders. It lives in one place, `catalog.CountedOrders` in `internal/catalog/sales.go`, used by product sales and every figure in `internal/analytics`, so changing the rule is a one-line change.
 - **Notifications:**
   - Templates come from Settings.
   - The channel (WhatsApp or SMS) is OPEN.
@@ -213,12 +214,12 @@ Packages marked with a milestone don't exist yet: they are created when their mi
 ## Build order (follows the BRIEF §13 milestones)
 
 1. **Skeleton:** done (M1).
-2. **OpenAPI spec:** v0.2.0.
+2. **OpenAPI spec:** v0.4.0 (analytics added).
 3. **Auth and catalogue (M2):** staff auth done; brand CRUD done (reference example); admin products, the public catalogue and the seed done (task cards T01, T03–T09); media upload, cover, order and delete done.
 4. **Orders:** delivery zones list and admin riders list done (T02); state machine, events, stock, admin order detail, transition and undo done; manual WhatsApp and shop orders and confirm-payment done; website order creation done; cart quote done (discounts wait for the "Buy 2" rules, OPEN); admin orders list and pipeline done (T10); edit an order (private note, clear the attention flag) done; customer order tracking done. Every operation in the spec v0.3.0 is now built.
 5. **Payments:** the interface, the `fake` provider, pay, payment state, webhooks plus verify, and the housekeeping job (auto-cancel, missed webhooks) done; then the chosen provider in sandbox.
 6. **Notifications:** outbox and senders.
-7. **Analytics:** summary, revenue series (monthly and yearly), best sellers, ranking, brand table; xlsx export.
+7. **Analytics:** summary, revenue series (monthly and yearly), best sellers, ranking and brand sales done (`internal/analytics`, tested against the seed totals); xlsx export later (Phase 2).
 8. **Phase 2:** insights (formulas in BRIEF §7.5) and the weekly summary job.
 
 `docs/tasks/README.md` lists which steps are open-model task cards and which are strong-model work.

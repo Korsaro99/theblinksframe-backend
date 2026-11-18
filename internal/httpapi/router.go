@@ -11,6 +11,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
+	"theblinksframe-backend/internal/analytics"
 	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/delivery"
 	"theblinksframe-backend/internal/httpapi/gen"
@@ -35,10 +36,11 @@ type Deps struct {
 	LoginLimiter LoginLimiter
 	Cookies      CookieOptions
 
-	Catalog  *catalog.Store
-	Delivery *delivery.Store
-	Orders   *orders.Store
-	Media    *media.Library
+	Catalog   *catalog.Store
+	Analytics *analytics.Store
+	Delivery  *delivery.Store
+	Orders    *orders.Store
+	Media     *media.Library
 	// MediaDir, when set, is a folder of uploaded media served at /media (development
 	// storage only; production serves media from the bucket).
 	MediaDir string
@@ -92,7 +94,7 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		r.Static("/media", d.MediaDir)
 	}
 
-	srv := &Server{catalog: d.Catalog, delivery: d.Delivery, orders: d.Orders, media: d.Media, payments: d.Payments, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log,
+	srv := &Server{catalog: d.Catalog, analytics: d.Analytics, delivery: d.Delivery, orders: d.Orders, media: d.Media, payments: d.Payments, auth: d.Auth, authz: d.Authorizer, limiter: d.LoginLimiter, cookies: d.Cookies, log: d.Log,
 		orderLimit: ratelimit.New(ordersPerIP, publicWindow, nil), payLimit: ratelimit.New(paysPerIP, publicWindow, nil),
 		trackLimit: ratelimit.New(tracksPerIP, publicWindow, nil)}
 	spec, err := gen.GetSwagger()

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: The Blinks API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     REST API for The Blinks storefront and back office. This file is the contract between
     `theblinksframe-backend` and the Angular frontend: change it first, then regenerate both sides.
@@ -42,6 +42,11 @@ tags:
     description: Brands and products in the back office.
   - name: Admin orders
     description: The order pipeline in the back office.
+  - name: Admin analytics
+    description: |
+      Dashboard numbers. One rule decides what counts as a sale: an order paid in the period (by `paidAt`)
+      that was neither cancelled nor refunded. Revenue is what the items sold for; delivery fees are not
+      revenue. Periods are in Africa/Accra.
 
 paths:
   # ---------------------------------------------------------------- Auth
@@ -1034,6 +1039,116 @@ paths:
               schema: { $ref: '#/components/schemas/RiderList' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  # ---------------------------------------------------------------- Admin analytics
+  /admin/analytics/summary:
+    get:
+      tags: [Admin analytics]
+      operationId: adminGetAnalyticsSummary
+      summary: Dashboard KPIs for a period
+      description: |
+        Revenue, orders, average order and the "To process" count, with last period's revenue so the
+        frontend can show the change. The previous period covers the same stretch of time one period
+        earlier: on 18 September, THIS_MONTH compares 1–18 September with 1–18 August, and TODAY compares
+        today so far with yesterday up to the same time. So a period that has just started isn't compared
+        with a whole one.
+      security: [{ accessCookie: [] }]
+      parameters:
+        - name: period
+          in: query
+          schema: { $ref: '#/components/schemas/AnalyticsPeriod' }
+      responses:
+        '200':
+          description: The KPIs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/analytics/revenue:
+    get:
+      tags: [Admin analytics]
+      operationId: adminGetRevenueSeries
+      summary: Revenue chart and its table view
+      description: |
+        MONTH: the last 12 calendar months including this one, oldest first. YEAR: every year from the
+        first sale to this one. Periods without sales are included, with zeros.
+      security: [{ accessCookie: [] }]
+      parameters:
+        - name: granularity
+          in: query
+          schema: { $ref: '#/components/schemas/RevenueGranularity' }
+      responses:
+        '200':
+          description: The series.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevenueSeries' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/analytics/best-sellers:
+    get:
+      tags: [Admin analytics]
+      operationId: adminGetBestSellers
+      summary: Best sellers this week, month or year
+      description: |
+        Products by units sold in the calendar period so far (weeks start on Monday), most first; ties go
+        to the higher revenue, then the model name. Only products that sold at least one unit.
+      security: [{ accessCookie: [] }]
+      parameters:
+        - name: period
+          in: query
+          schema: { $ref: '#/components/schemas/BestSellersPeriod' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        '200':
+          description: The best sellers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BestSellers' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/analytics/ranking:
+    get:
+      tags: [Admin analytics]
+      operationId: adminGetProductRanking
+      summary: All-time product ranking
+      description: |
+        Every product that has sold, all time, by units or by revenue; ties go to the other measure, then
+        the model name. `rank` is the position in the whole ranking, not just the page.
+      security: [{ accessCookie: [] }]
+      parameters:
+        - name: by
+          in: query
+          schema: { $ref: '#/components/schemas/RankingMeasure' }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: A page of the ranking.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RankedProductList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/analytics/brands:
+    get:
+      tags: [Admin analytics]
+      operationId: adminGetBrandSales
+      summary: Sales per brand, this month and all time
+      description: |
+        Every brand, including those with no sales, for the Brands table. Models, stock and share of sales
+        come from the product list the page already loads.
+      security: [{ accessCookie: [] }]
+      responses:
+        '200':
+          description: One row per brand. Not paginated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandSalesList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
 components:
   securitySchemes:
     accessCookie:
@@ -1944,3 +2059,138 @@ components:
           description: |
             Badge on the sidebar: orders that are paid, packed, ready for pickup or flagged
             needsAttention, each counted once.
+
+    # ---------------------------------------------------------- Admin analytics
+    AnalyticsPeriod:
+      type: string
+      enum: [TODAY, LAST_7_DAYS, THIS_MONTH, THIS_YEAR, ALL_TIME]
+      default: THIS_MONTH
+      description: LAST_7_DAYS is the 7 × 24 hours up to now; the others are calendar periods so far.
+    RevenueGranularity:
+      type: string
+      enum: [MONTH, YEAR]
+      default: MONTH
+    BestSellersPeriod:
+      type: string
+      enum: [THIS_WEEK, THIS_MONTH, THIS_YEAR]
+      default: THIS_MONTH
+    RankingMeasure:
+      type: string
+      enum: [UNITS, REVENUE]
+      default: UNITS
+    AnalyticsSummary:
+      type: object
+      required: [period, to, revenuePesewas, deliveryFeesPesewas, paidOrders, averageOrderPesewas, orders, toProcess,
+        last12Months]
+      properties:
+        period: { $ref: '#/components/schemas/AnalyticsPeriod' }
+        from: { type: string, format: date-time, description: 'Start of the period. Absent for ALL_TIME.' }
+        to: { type: string, format: date-time, description: 'End of the period: now.' }
+        revenuePesewas:
+          type: integer
+          format: int64
+          description: What the items sold for, in orders that count as sales in the period.
+        previousRevenuePesewas:
+          type: integer
+          format: int64
+          description: |
+            Revenue in the same stretch of the previous period. Absent for ALL_TIME. The frontend works out
+            the change; it is 0 → n when there were no sales before, which it shows as "new", not a percentage.
+        deliveryFeesPesewas:
+          type: integer
+          format: int64
+          description: Delivery fees on the same orders. Not part of revenue.
+        paidOrders: { type: integer, description: 'Orders that count as sales in the period.' }
+        averageOrderPesewas:
+          type: integer
+          format: int64
+          description: revenuePesewas ÷ paidOrders, rounded to the nearest pesewa; 0 when there are none.
+        orders: { $ref: '#/components/schemas/OrdersBySource' }
+        toProcess:
+          type: integer
+          description: Same as the pipeline's `toDo`. Not limited to the period.
+        last12Months:
+          type: array
+          description: Revenue per calendar month for the sparkline, 12 entries, oldest first, this month last.
+          items: { $ref: '#/components/schemas/RevenuePoint' }
+    OrdersBySource:
+      type: object
+      description: |
+        Orders placed in the period (by `createdAt`), whatever their status now, except website checkouts
+        that were cancelled without being paid: those are abandoned carts, not orders.
+      required: [total, website, whatsApp, shop]
+      properties:
+        total: { type: integer }
+        website: { type: integer }
+        whatsApp: { type: integer }
+        shop: { type: integer }
+    RevenueSeries:
+      type: object
+      required: [granularity, points]
+      properties:
+        granularity: { $ref: '#/components/schemas/RevenueGranularity' }
+        points: { type: array, items: { $ref: '#/components/schemas/RevenuePoint' } }
+    RevenuePoint:
+      type: object
+      required: [period, revenuePesewas, paidOrders, units]
+      properties:
+        period:
+          type: string
+          description: 'The month as YYYY-MM, or the year as YYYY.'
+          example: '2026-09'
+        revenuePesewas: { type: integer, format: int64 }
+        paidOrders: { type: integer }
+        units: { type: integer }
+    AnalyticsProduct:
+      type: object
+      description: A product in the analytics lists, with its current name, brand and cover.
+      required: [id, slug, modelName, brand]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        modelName: { type: string }
+        brand: { $ref: '#/components/schemas/BrandRef' }
+        cover: { $ref: '#/components/schemas/Image' }
+    ProductSales:
+      type: object
+      required: [product, units, revenuePesewas]
+      properties:
+        product: { $ref: '#/components/schemas/AnalyticsProduct' }
+        units: { type: integer }
+        revenuePesewas: { type: integer, format: int64 }
+    BestSellers:
+      type: object
+      required: [period, from, to, items]
+      properties:
+        period: { $ref: '#/components/schemas/BestSellersPeriod' }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        items: { type: array, items: { $ref: '#/components/schemas/ProductSales' } }
+    RankedProduct:
+      allOf:
+        - $ref: '#/components/schemas/ProductSales'
+        - type: object
+          required: [rank]
+          properties:
+            rank: { type: integer, minimum: 1 }
+    RankedProductList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RankedProduct' } }
+        total: { type: integer }
+    BrandSales:
+      type: object
+      required: [brand, unitsThisMonth, revenueThisMonthPesewas, allTimeUnits, allTimeRevenuePesewas]
+      properties:
+        brand: { $ref: '#/components/schemas/BrandRef' }
+        unitsThisMonth: { type: integer }
+        revenueThisMonthPesewas: { type: integer, format: int64 }
+        allTimeUnits: { type: integer }
+        allTimeRevenuePesewas: { type: integer, format: int64 }
+    BrandSalesList:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/BrandSales' } }
+        total: { type: integer }

@@ -372,11 +372,11 @@ Any state before DELIVERED ──► CANCELLED
 
 ### 7.4 Dashboard numbers
 
-- **Revenue** (PROPOSED): the sum of `totalPesewas` for orders with a successful payment and not cancelled or refunded, dated by `paidAt`.
-  - Confirm this. The Order tracking mockup says "Mark it delivered so it counts in your sales", which implies counting at delivery. Pick one rule and fix the copy to match.
+- **Revenue** (DECIDED 2026-11-18: items only): what the items sold for (quantity × unit price charged) in orders with a successful payment and not cancelled or refunded, dated by `paidAt`. Delivery fees are not revenue (they mostly pay the riders); the dashboard shows them as a separate figure. So the revenue KPI equals the sum of the brands table and of best sellers.
+  - Still PROPOSED: counting at payment rather than at delivery. The Order tracking mockup says "Mark it delivered so it counts in your sales", which implies counting at delivery. Pick one rule and fix the copy to match (§14 Q21).
 - **Orders:** count by `createdAt` in the period, split by `source`.
 - **Average order:** revenue ÷ paid orders.
-- **Change %:** compare with the previous period of the same length.
+- **Change %:** compare with the same stretch of the previous period (1–18 September with 1–18 August), so a period that has just started isn't compared with a whole one. The API returns both amounts; the frontend works out the change.
 - **Best sellers:** units sold in the period (excluding cancelled), with revenue.
 - **All-time ranking:** sortable by units or revenue.
 - **Brand table:** for each brand, models, stock, units sold, revenue, share of revenue and all-time units. The Men vs Women split covers sunglasses only.
@@ -518,11 +518,11 @@ POST /admin/orders                       manual WhatsApp / shop order
 GET  /admin/orders/:id
 POST /admin/orders/:id/transition        { to, note?, riderId? }
 POST /admin/orders/:id/confirm-payment   { reference, network }
-GET  /admin/analytics/summary?period
-GET  /admin/analytics/revenue?granularity=month|year
-GET  /admin/analytics/best-sellers?period=week|month|year
-GET  /admin/analytics/ranking?by=units|revenue
-GET  /admin/analytics/brands?period
+GET  /admin/analytics/summary?period=TODAY|LAST_7_DAYS|THIS_MONTH|THIS_YEAR|ALL_TIME
+GET  /admin/analytics/revenue?granularity=MONTH|YEAR
+GET  /admin/analytics/best-sellers?period=THIS_WEEK|THIS_MONTH|THIS_YEAR&limit
+GET  /admin/analytics/ranking?by=UNITS|REVENUE&page&pageSize
+GET  /admin/analytics/brands                 this month and all time, per brand
 GET  /admin/analytics/insights
 GET  /admin/export/sales.xlsx?from&to
 GET|PUT /admin/settings
@@ -627,3 +627,4 @@ Still open:
 | 2026-10-16 | Domain: `theblinksframes.com`, bought on Cloudflare Registrar. The site is on the bare domain (`www` redirects to it) and the API on `api.theblinksframes.com` (§10). Who pays for hosting is still open (§14 Q4). |
 | 2026-10-16 | The Oracle VM is x86_64, not ARM as noted on 2026-10-04: images are built for `linux/amd64`. Production runs with Docker Compose behind its own Cloudflare Tunnel (`blinks-prod`), with no open ports and a database login for the API that can't change the schema (backend `deploy/README.md`). The storefront demo on `theblinksframes.com` uses a separate tunnel until the switch-over. |
 | 2026-10-17 | Database backups: nightly `pg_dump` by a read-only login, encrypted with age on the VM, uploaded to Oracle Object Storage for now (same account as the VM; a second copy with another company is the next step). Restore drill before launch, then every three months (backend `deploy/README.md`, "Backups"). |
+| 2026-11-18 | Dashboard revenue counts the items only, not delivery fees (§7.4), the same rule as "sold this month" on Products and Brands. The analytics endpoints are in API contract v0.4.0 (§12). |

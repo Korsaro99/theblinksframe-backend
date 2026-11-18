@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"theblinksframe-backend/internal/analytics"
 	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/delivery"
@@ -48,6 +49,7 @@ type LoginLimiter interface {
 type Server struct {
 	unimplemented //nolint:unused // answers 501 for spec operations not built yet (unimplemented.go)
 	catalog       *catalog.Store
+	analytics     *analytics.Store
 	delivery      *delivery.Store
 	orders        *orders.Store
 	media         *media.Library

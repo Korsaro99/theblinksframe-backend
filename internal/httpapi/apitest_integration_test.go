@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"theblinksframe-backend/internal/analytics"
 	"theblinksframe-backend/internal/auth"
 	"theblinksframe-backend/internal/catalog"
 	"theblinksframe-backend/internal/delivery"
@@ -89,6 +90,7 @@ func newAPIWith(t *testing.T, pay *fake.Provider) *testAPI {
 		LoginLimiter: auth.NewLoginLimiter(time.Now),
 		Cookies:      CookieOptions{Secure: true},
 		Catalog:      catalog.NewStore(testDB, func() time.Time { return testNow }),
+		Analytics:    analytics.NewStore(testDB, func() time.Time { return testNow }),
 		Delivery:     delivery.NewStore(testDB),
 		Orders:       store,
 		Payments:     pay,
