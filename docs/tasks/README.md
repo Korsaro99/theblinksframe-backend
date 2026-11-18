@@ -87,7 +87,6 @@ None right now. The next cards wait for the strong-model steps below.
 |---|---|
 | Settings `GET/PUT /admin/settings` | Settings schema and spec (strong model) |
 | Delivery zone and rider admin CRUD | Spec for Settings screens (strong model) |
-| Customer order tracking `POST /orders/track` | Tests for the enumeration rules and its rate limit, written by the strong model (order creation is done) |
 | Excel export | Analytics queries (strong model, M6) |
 | Notification template rendering | Outbox and settings (strong model, M5) |
 

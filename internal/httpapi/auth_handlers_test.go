@@ -231,12 +231,12 @@ func TestAdminRoutesNeedLogin(t *testing.T) {
 		// needs no database.
 		{"staff may read orders", models.RoleStaff, request{method: "GET", path: "/api/v1/admin/orders/not-a-uuid", cookies: logged}, 400, "BAD_REQUEST"},
 		// The owner's undo itself is tested against a database in TestAdminUndo. Here, a
-		// mutating route that is still a stub shows the owner gets past role and CSRF checks.
-		// Move it to another stub when this one is implemented.
-		{"owner may edit an order note", models.RoleOwner, request{method: "PATCH", path: "/api/v1/admin/orders/" + uuid.NewString(), body: `{"privateNote":"Call first"}`, cookies: logged, csrf: csrf}, 501, "NOT_IMPLEMENTED"},
-		// Probe a public route that is still a stub, so the test needs no database. Move it
-		// to another stub when this one is implemented.
-		{"public route needs no login", "", request{method: "POST", path: "/api/v1/orders/track", body: `{"number":1091,"phone":"0241234567"}`}, 501, "NOT_IMPLEMENTED"},
+		// mutating request that reaches request validation (a bad id) shows the owner gets past
+		// the role and CSRF checks, without needing a database.
+		{"owner gets past role and csrf checks", models.RoleOwner, request{method: "PATCH", path: "/api/v1/admin/orders/not-a-uuid", body: `{"privateNote":"Call first"}`, cookies: logged, csrf: csrf}, 400, "BAD_REQUEST"},
+		// A public route reaches request validation (no phone) without a login, so the test
+		// needs no database.
+		{"public route needs no login", "", request{method: "POST", path: "/api/v1/orders/track", body: `{"number":1091}`}, 422, "VALIDATION"},
 		{"bad path parameter", models.RoleOwner, request{method: "GET", path: "/api/v1/admin/orders/not-a-uuid", cookies: logged}, 400, "BAD_REQUEST"},
 		{"body too large", "", request{method: "POST", path: "/api/v1/auth/login", body: `{"login":"` + strings.Repeat("x", maxJSONBody) + `"}`}, 413, "TOO_LARGE"},
 	}
