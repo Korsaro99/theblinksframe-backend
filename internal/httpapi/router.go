@@ -73,10 +73,13 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	r.Use(requestID(), accessLog(d.Log), recovery(d.Log))
 	if len(d.CORSAllowedOrigins) > 0 {
 		r.Use(cors.New(cors.Config{
-			AllowOrigins:     d.CORSAllowedOrigins,
-			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
-			AllowHeaders:     []string{"Content-Type", "X-CSRF-Token", RequestIDHeader},
-			ExposeHeaders:    []string{RequestIDHeader},
+			AllowOrigins: d.CORSAllowedOrigins,
+			AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
+			// Idempotency-Key: website checkout (POST /orders) and manual orders send it, so a
+			// retried request on a flaky connection never creates a second order.
+			AllowHeaders: []string{"Content-Type", "X-CSRF-Token", "Idempotency-Key", RequestIDHeader},
+			// Retry-After: a 429 says how long to wait; without this the browser hides it from the page.
+			ExposeHeaders:    []string{RequestIDHeader, "Retry-After"},
 			AllowCredentials: true, // the admin auth cookies
 			MaxAge:           12 * time.Hour,
 		}))
