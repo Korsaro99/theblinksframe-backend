@@ -67,6 +67,24 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
+func TestThisWeek(t *testing.T) {
+	monday := time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
+	for _, now := range []time.Time{
+		monday, // the first instant of the week
+		time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC),  // a Wednesday
+		time.Date(2026, 9, 20, 23, 59, 0, 0, time.UTC), // the Sunday night
+	} {
+		from, to := ThisWeek(now)
+		if !from.Equal(monday) || !to.Equal(monday.AddDate(0, 0, 7)) {
+			t.Errorf("ThisWeek(%v) = %v .. %v; want Monday 14 to Monday 21 September", now, from, to)
+		}
+	}
+	// Across a month end: Thursday 1 October belongs to the week of Monday 28 September.
+	if from, _ := ThisWeek(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)); !from.Equal(time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("ThisWeek(1 October) starts %v, want 28 September", from)
+	}
+}
+
 func TestThisMonth(t *testing.T) {
 	from, to := ThisMonth(time.Date(2026, 9, 30, 23, 59, 0, 0, time.UTC))
 	if !from.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) || !to.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) {

@@ -32,6 +32,15 @@ func ThisMonth(now time.Time) (from, to time.Time) {
 	return start.UTC(), start.AddDate(0, 1, 0).UTC()
 }
 
+// ThisWeek returns the week containing now, Monday 00:00 to the next Monday, in
+// Africa/Accra, as [from, to) in UTC.
+func ThisWeek(now time.Time) (from, to time.Time) {
+	local := now.In(accra)
+	daysSinceMonday := (int(local.Weekday()) + 6) % 7 // Sunday is 0 in Go
+	start := time.Date(local.Year(), local.Month(), local.Day()-daysSinceMonday, 0, 0, 0, 0, accra)
+	return start.UTC(), start.AddDate(0, 0, 7).UTC()
+}
+
 // Last30Days returns the 30 days up to and including now, as [from, to) in UTC.
 // "Best sellers" sorting uses it.
 func Last30Days(now time.Time) (from, to time.Time) {

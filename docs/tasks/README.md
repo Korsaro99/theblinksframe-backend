@@ -75,6 +75,7 @@ Tips for running open models:
 | [T07](T07-storefront-detail.md) | Storefront product page | T06 | S | done |
 | [T08](T08-menu.md) | Menu counts | none | S | done |
 | [T09](T09-seed.md) | Development sample data (`make seed`) | none | M | done |
+| [T10](T10-admin-orders-list.md) | Admin orders list and pipeline counts | none | M | done |
 
 ### Ready for an open model (not done)
 
@@ -86,9 +87,7 @@ None right now. The next cards wait for the strong-model steps below.
 |---|---|
 | Settings `GET/PUT /admin/settings` | Settings schema and spec (strong model) |
 | Delivery zone and rider admin CRUD | Spec for Settings screens (strong model) |
-| Admin order list and pipeline counts | Nothing: the state machine and order detail are done, so the card can be written (strong model) |
 | Customer order tracking `POST /orders/track` | Tests for the enumeration rules and its rate limit, written by the strong model (order creation is done) |
-| Cart quote `POST /cart/quote` | "Buy 2" deal and delivery fee rules (OPEN, BRIEF §9), then quote rules design |
 | Excel export | Analytics queries (strong model, M6) |
 | Notification template rendering | Outbox and settings (strong model, M5) |
 

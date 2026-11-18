@@ -58,7 +58,7 @@ func (s *Store) ListAdminProducts(ctx context.Context, f AdminProductFilter) ([]
 		q = q.Where("products.stock <= products.low_stock_threshold")
 	}
 	if f.Query != "" {
-		like := "%" + escapeLike(f.Query) + "%"
+		like := "%" + EscapeLike(f.Query) + "%"
 		q = q.Where("(products.model_name ILIKE ? ESCAPE '\\' OR products.sku ILIKE ? ESCAPE '\\')", like, like)
 	}
 
@@ -126,7 +126,9 @@ func (s *Store) withThisMonthSales(ctx context.Context, products []models.Produc
 	return out, nil
 }
 
-// escapeLike puts a backslash before \, % and _ so they are plain characters in ILIKE.
-func escapeLike(s string) string {
+// EscapeLike puts a backslash before \, % and _ so they are plain characters in a LIKE or
+// ILIKE pattern written with ESCAPE '\'. Use it on any user input that goes into a pattern:
+// without it, a search for "%" would match everything.
+func EscapeLike(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
